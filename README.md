@@ -7,7 +7,8 @@ cdk synth --no-staging > template.yaml
 # generate test event (apigateway in this case)
 am local generate-event apigateway aws-proxy > apigateway_event.json
 # using lambda identifier from template.lamda, run lambda locally
-sam local invoke ExternalApiHandler7E50D66D --event ./apigateway_event.json
+# use a file (env.json below) to specify any required environment variables (e.g. lambda table name)
+sam local invoke ExternalApiHandler7E50D66D --event ./apigateway_event.json  --env-vars env.json
 ```
 
 ## invoke deployed lambda

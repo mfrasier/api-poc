@@ -22,7 +22,9 @@ setuptools.setup(
         "aws-cdk.core",
         "aws-cdk.aws-events",
         "aws-cdk.aws-lambda",
-        "aws-cdk.aws-events-targets"
+        "aws-cdk.aws-events-targets",
+        "aws-cdk.aws-dynamodb",
+        "boto3"
     ],
 
     python_requires=">=3.6",
