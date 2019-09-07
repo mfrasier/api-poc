@@ -3,6 +3,8 @@ from aws_cdk import (
     aws_dynamodb as dynamodb,
     aws_apigateway as apigw,
     aws_elasticache as elasticache,
+    aws_ec2 as ec2,
+    aws_iam as iam,
     core
 )
 
@@ -42,6 +44,17 @@ class ExternalApi(core.Construct):
             subnet_ids=['subnet-909a58bb']
         )
 
+        # defaut_sg = ec2.SecurityGroup.from_security_group_id(
+        #     self, 'default_sg',
+        #     security_group_id='sg-9d857bf9')
+        #
+        # defaut_sg.add_ingress_rule(
+        #     self,
+        #     description='redis',
+        #     peer=
+        #     connection=
+        # )
+
         self.redis_cache = elasticache.CfnCacheCluster(
             self, 'cache',
             cache_node_type='cache.t2.medium',
@@ -58,13 +71,30 @@ class ExternalApi(core.Construct):
                   self.redis_cache.attr_redis_endpoint_port
         )
 
+        vpc = ec2.Vpc.from_lookup(
+            self, 'my_vpc',
+            vpc_name='MyVPC1'
+        )
+
+        python3_lib_layer = _lambda.LayerVersion.from_layer_version_arn(
+            self, 'python3-lib-layer',
+            layer_version_arn='arn:aws:lambda:us-east-1:011955760856:layer:python3-lib-layer:1'
+        )
+
         # external API simulator lambda
         api_handler = _lambda.Function(
             self, "ExternalApiHandler",
             runtime=_lambda.Runtime.PYTHON_3_7,
             code=_lambda.Code.asset('lambda'),
             handler='external_api.handler',
-            tracing=_lambda.Tracing.ACTIVE
+            layers=[python3_lib_layer],
+            tracing=_lambda.Tracing.ACTIVE,
+            vpc=vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE),
+            security_group=ec2.SecurityGroup.from_security_group_id(
+                self, 'default-sg',
+                security_group_id='sg-9d857bf9'
+            )
         )
         api_handler.add_environment('THROTTLE_TABLE_NAME', table.table_name)
         api_handler.add_environment('REDIS_ADDRESS', self.redis_address)

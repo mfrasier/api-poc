@@ -14,10 +14,10 @@ LOG.setLevel(logging.INFO)
 ddb = boto3.resource('dynamodb')
 table = ddb.Table(os.environ['THROTTLE_TABLE_NAME'])
 
-# r = redis.Redis(
-#     host=os.environ('REDIS_ADDRESS'),
-#     port=os.environ('REDIS_PORT')
-# )
+r = redis.Redis(
+    host=os.environ['REDIS_ADDRESS'],
+    port=os.environ['REDIS_PORT']
+)
 
 
 def handler(event, context):
@@ -27,16 +27,19 @@ def handler(event, context):
     """
     LOG.info('request: {}'.format(json.dumps(event)))
     LOG.info('throttle tracking table={}'.format(table))
+    LOG.info('redis address: {}'.format(os.environ['REDIS_ADDRESS']))
 
-    # r.set('foo', 'bar')
-    # value = r.value('foo')
-    # print('value of foo={}'.format(value))
+    r.set('foo', 'bar')
+    value = r.get('foo')
+    print('value of foo={}'.format(value))
 
-    table.update_item(
-        Key={'path': event['path']},
-        UpdateExpression='SET hits = if_not_exists(hits, :zero) + :inc, last_hit = :t',
-        ExpressionAttributeValues={':zero': 0, ':inc': 1, ':t': str(datetime.utcnow())}
-    )
+    # can't reach dynamodb wti vpc now - needs a NAT?
+    # but, redis
+    # table.update_item(
+    #     Key={'path': event['path']},
+    #     UpdateExpression='SET hits = if_not_exists(hits, :zero) + :inc, last_hit = :t',
+    #     ExpressionAttributeValues={':zero': 0, ':inc': 1, ':t': str(datetime.utcnow())}
+    # )
 
     return {
         'statusCode': 200,
