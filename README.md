@@ -1,6 +1,18 @@
 
 
 ## Test lambda locally with sam cli
+
+sample file://env.json
+```json
+{
+  "ExternalApiExternalApiHandlerAF86094E": {
+    "THROTTLE_TABLE_NAME": "api-poc-mfrasier-ExternalApithrottlesD9293C28-YJ94HSBEUJ4Y",
+    "REDIS_ADDRESS": "api-ex-hga6ejncnzsi.amxlzo.0001.use1.cache.amazonaws.com",
+    "REDIS_PORT": "6379"
+  }
+}
+```
+
 ```shell script
 # generate cloudformation template for sam debugging
 cdk synth --no-staging > template.yaml

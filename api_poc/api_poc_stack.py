@@ -1,7 +1,6 @@
 from aws_cdk import (
     # aws_events as events,
     # aws_events_targets as targets,
-    aws_apigateway as apigw,
     core
 )
 
@@ -18,10 +17,3 @@ class ApiPocStack(core.Stack):
 
         # external api construct
         external_api = ExternalApi(self, 'ExternalApi')
-
-        # API Gateway frontend to simulator lambda
-        external_gateway = apigw.LambdaRestApi(
-            self, 'external_api',
-            handler=external_api.handler,
-            proxy=True
-        )

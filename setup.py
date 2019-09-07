@@ -24,6 +24,9 @@ setuptools.setup(
         "aws-cdk.aws-lambda",
         "aws-cdk.aws-events-targets",
         "aws-cdk.aws-dynamodb",
+        "aws_cdk.aws-elasticache",
+        "cdk-watchful",
+        "redis",
         "boto3"
     ],
 
