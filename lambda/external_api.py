@@ -43,7 +43,6 @@ r = redis.Redis(
     port=os.environ['REDIS_PORT']
 )
 
-LOG.info(r)
 
 def handler(event, context):
     """
@@ -93,7 +92,7 @@ def handler(event, context):
             'headers': {
                 'Content-Type': 'application/json'
             },
-            'body': body
+            'body': json.dumps(body)
         }
     ))
 
@@ -102,7 +101,7 @@ def handler(event, context):
         'headers': {
             'Content-Type': 'application/json'
         },
-        'body': body
+        'body': json.dumps(body)
     }
 
 
@@ -140,7 +139,7 @@ def key_quota(key: str)-> int:
     :param key: key name
     :return: int showing quota count or -1 if not defined
     """
-    resource_key = key.split(':')[:-1]  # strip off api_key
+    resource_key = ':'.join(key.split(':')[:-1])  # strip off api_key
     try:
         quota = thresholds[resource_key]['count']
     except KeyError as e:
@@ -157,9 +156,11 @@ def increment_key(key: str) -> int:
     :return: key value after incr
     """
     if r.exists(key):
-        value = r.incr(key)
+        value = r.decr(key)
     else:
-        value = r.incr(key)
-        # r.expire(key, thresholds['global']['interval'])  # set ttl
+        LOG.info('set initial key value {}={}'.format(key, key_quota(key)))
+        r.set(key, key_quota(key))
+        value = r.decr(key)
+        r.expire(key, thresholds['global']['interval'])  # set ttl
 
     return value
