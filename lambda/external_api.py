@@ -12,15 +12,13 @@ Simulate an external RESTful API service with client throttling
 """
 LOG = logging.getLogger()
 LOG.setLevel(logging.INFO)
-ddb = boto3.resource('dynamodb')
-table = ddb.Table(os.environ['THROTTLE_TABLE_NAME'])
 
-Response = namedtuple('Response', ['status_code', 'data', 'key', 'quota'])
+Response = namedtuple('Response', ['status_code', 'data', 'key', 'quota', 'message'])
 
 # throttle thresholds
 thresholds = {
     'global': {
-        'interval': 60 * 60,
+        'interval': 60,
     },
     'survey': {
         'count': 50
@@ -50,16 +48,16 @@ def handler(event, context):
     event contains dict from api gateway request
     """
     LOG.info('request: {}'.format(json.dumps(event)))
-    LOG.info('throttle tracking table={}'.format(table))
     LOG.info('redis address: {}'.format(os.environ['REDIS_ADDRESS']))
 
     api_key = 'none'  # using empty api_key for now
     path = event['path']
-    LOG.info("path='{}'".format(path))
+    LOG.info(f"path='{path}'")
 
     if path.startswith('/survey'):
-        response = get_response(path=path, api_key=api_key)
-        print('remaining quota of {}={}'.format(response.key, response.quota))
+        response = get_response(location=path, api_key=api_key)
+        LOG.info(f'response={response}')
+        LOG.info(f'remaining quota of {response.key}={response.quota}')
 
         body = {
             'data': response.data,
@@ -71,30 +69,12 @@ def handler(event, context):
             body['message'] = 'Hello, CDK!  You have hit {}\n'.format(path),
         else:
             body['status_code'] = 429
-            body['message'] = 'quota is exceeded for path {}'.format(path)
+            body['message'] = response.message
     else:
         body = {
             'status_code': 400,
-            'message': "'{}' is not a valid resource".format(path)
+            'message': f"'{path}' is not a valid resource"
         }
-
-    # can't reach dynamodb with vpc now - needs a NAT or service endpoint
-    # but, redis
-    # table.update_item(
-    #     Key={'path': event['path']},
-    #     UpdateExpression='SET hits = if_not_exists(hits, :zero) + :inc, last_hit = :t',
-    #     ExpressionAttributeValues={':zero': 0, ':inc': 1, ':t': str(datetime.utcnow())}
-    # )
-
-    print('returning {}'.format(
-        {
-            'statusCode': body['status_code'],
-            'headers': {
-                'Content-Type': 'application/json'
-            },
-            'body': json.dumps(body)
-        }
-    ))
 
     return {
         'statusCode': body['status_code'],
@@ -105,17 +85,47 @@ def handler(event, context):
     }
 
 
-def get_response(path: str, api_key: str) -> namedtuple:
+def get_response(location: str, api_key: str) -> namedtuple:
     """
     get response data
-    :param path: request path
+    :param location: request path
     :param api_key: api_key or ''
     :return:
     """
-    key = make_key(path, api_key)
-    new_key_value = increment_key(key)
+    key = make_key(location, api_key)
+    exceeded, location = quota_exceeded(key)
 
-    return Response(status_code=200, data={'data': 'something'}, key=key, quota=new_key_value)
+    if exceeded:
+        response = Response(status_code=200, data={'data': 'something'}, key=key, quota=0,
+                            message=f'quota exceeded at {location}')
+    else:
+        new_key_value = decrement_key(key)
+        response = Response(status_code=200, data={'data': 'something'}, key=key, quota=new_key_value, message='ok')
+
+    return response
+
+
+def quota_exceeded(key:str)-> 'tuple':
+    """
+    check quota of key and parent paths
+    :param key:
+    :return: True if quota exceeded, otherwise False
+    """
+    resources, api_key = list(key.split(':')[:-1]), key.split(':')[-1:][0]
+    for end in range(len(resources) - 1, 0, -1):
+        parent_key = ':'.join([*resources[:-end], api_key])
+        LOG.info(f'checking exceeded quota for resource_key: {parent_key}')
+        quota = r.get(parent_key)
+        LOG.info(f'quota for {parent_key}={quota}')
+        if quota is not None and int(quota) <= 0:
+            return True, parent_key
+
+    quota = r.get(key)
+    LOG.info(f'quota for {key}={quota}')
+    if quota is not None and int(r.get(key)) <= 0:
+        return True, key
+
+    return False, None
 
 
 def make_key(path: str, api_key: str)-> str:
@@ -125,9 +135,7 @@ def make_key(path: str, api_key: str)-> str:
     :param api_key: api_key or ''
     :return: storage key
     """
-    LOG.info('pattern.findall({})={}'.format(path, re.findall(pattern, path)))
     path_parts = re.findall(pattern, path)
-    LOG.info('path_parts={}'.format(path_parts))
     key = ':'.join([*path_parts, api_key])
     LOG.info('redis key={}'.format(key))
     return key
@@ -139,28 +147,45 @@ def key_quota(key: str)-> int:
     :param key: key name
     :return: int showing quota count or -1 if not defined
     """
-    resource_key = ':'.join(key.split(':')[:-1])  # strip off api_key
+    # resource_key = ':'.join(key.split(':')[:-1])  # strip off api_key
     try:
-        quota = thresholds[resource_key]['count']
+        quota = thresholds[key]['count']
     except KeyError as e:
-        LOG.info('resource_key {} not found in thresholds'.format(resource_key))
+        LOG.info('resource_key {} not found in thresholds'.format(key))
         quota = -1
 
     return quota
 
-# TODO set to 'count' and set expire when key created, decrement instead
-def increment_key(key: str) -> int:
+
+def decrement_key(key: str) -> int:
     """
-    increment resource count key
+    walk down resource path composite keys
+      if key not exist, set to threshold count and set expire
+      decrement resource count key
     :param key: item key
-    :return: key value after incr
+    :return: key value after decrement of last key
     """
-    if r.exists(key):
-        value = r.decr(key)
-    else:
-        LOG.info('set initial key value {}={}'.format(key, key_quota(key)))
-        r.set(key, key_quota(key))
-        value = r.decr(key)
+    # decrement parent keys
+    resources, api_key = list(key.split(':')[:-1]), key.split(':')[-1:][0]
+    for end in range(len(resources) - 1, 0, -1):
+        parent_key = ':'.join([*resources[:-end], api_key])
+        LOG.info(f'decrementing parent resource_key: {parent_key}')
+        if r.exists(parent_key):
+            LOG.info(f'decrementing parent key {parent_key}')
+            r.decr(parent_key)
+        else:
+            quota = key_quota(parent_key)
+            LOG.info(f'set initial parent key value {parent_key}={quota}')
+            r.set(parent_key, quota)
+            r.expire(parent_key, thresholds['global']['interval'])  # set ttl
+            r.decr(parent_key)
+
+    # decrement leaf key
+    if not r.exists(key):
+        quota = key_quota(key)
+        LOG.info(f'set initial leaf key value {key}={quota}')
+        r.set(parent_key, quota)
         r.expire(key, thresholds['global']['interval'])  # set ttl
 
-    return value
+    LOG.info(f'decrementing leaf key {key}')
+    return r.decr(key)

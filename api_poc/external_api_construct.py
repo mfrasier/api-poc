@@ -30,13 +30,6 @@ class ExternalApi(core.Construct):
     def __init__(self, scope: core.Construct, id: str, **kwargs):
         super().__init__(scope, id, **kwargs)
 
-        table = dynamodb.Table(
-            self, 'throttles',
-            partition_key={'name': 'path', 'type': dynamodb.AttributeType.STRING},
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=core.RemovalPolicy.DESTROY,
-        )
-
         # redis cache cluster
         cache_subnet_group = elasticache.CfnSubnetGroup(
             self, 'subnet_group',
@@ -44,20 +37,9 @@ class ExternalApi(core.Construct):
             subnet_ids=['subnet-909a58bb']
         )
 
-        # defaut_sg = ec2.SecurityGroup.from_security_group_id(
-        #     self, 'default_sg',
-        #     security_group_id='sg-9d857bf9')
-        #
-        # defaut_sg.add_ingress_rule(
-        #     self,
-        #     description='redis',
-        #     peer=
-        #     connection=
-        # )
-
         self.redis_cache = elasticache.CfnCacheCluster(
             self, 'cache',
-            cache_node_type='cache.t2.medium',
+            cache_node_type='cache.t2.small',
             num_cache_nodes=1,
             engine='redis',
             cache_subnet_group_name=cache_subnet_group.ref,
@@ -96,11 +78,8 @@ class ExternalApi(core.Construct):
                 security_group_id='sg-9d857bf9'
             )
         )
-        api_handler.add_environment('THROTTLE_TABLE_NAME', table.table_name)
         api_handler.add_environment('REDIS_ADDRESS', self.redis_address)
         api_handler.add_environment('REDIS_PORT', self.redis_port)
-
-        table.grant_read_write_data(api_handler)
 
         # API Gateway frontend to simulator lambda
         external_gateway = apigw.LambdaRestApi(
