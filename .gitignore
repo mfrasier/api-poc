@@ -1,6 +1,5 @@
 cdk.out/
 .idea/
-apigateway_event.json
 lambda.out
 template.yaml
 
@@ -131,3 +130,5 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+cdk.context.json
+dump.rdb
