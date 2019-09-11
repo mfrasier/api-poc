@@ -6,8 +6,7 @@ sample file://env.json
 ```json
 {
   "ExternalApiExternalApiHandlerAF86094E": {
-    "THROTTLE_TABLE_NAME": "api-poc-mfrasier-ExternalApithrottlesD9293C28-YJ94HSBEUJ4Y",
-    "REDIS_ADDRESS": "api-ex-hga6ejncnzsi.amxlzo.0001.use1.cache.amazonaws.com",
+    "REDIS_ADDRESS": "192.168.1.205",
     "REDIS_PORT": "6379"
   }
 }
@@ -22,6 +21,12 @@ am local generate-event apigateway aws-proxy > apigateway_event.json
 # use a file (env.json below) to specify any required environment variables (e.g. lambda table name)
 sam local invoke ExternalApiHandler7E50D66D --event ./apigateway_event.json  --env-vars env.json
 ```
+
+start a redis server
+
+local in this case - could also run one in a docker container
+
+`$ redis-server --protected-mode no`
 
 ## invoke deployed lambda
 ```shell script
