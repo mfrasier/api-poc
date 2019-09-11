@@ -37,7 +37,8 @@ pattern = r'/([a-zA-Z]+)'
 
 r = redis.Redis(
     host=os.environ['REDIS_ADDRESS'],
-    port=os.environ['REDIS_PORT']
+    port=os.environ['REDIS_PORT'],
+    decode_responses=True
 )
 
 
@@ -70,18 +71,20 @@ def handler(event, context):
             body['status_code'] = 429
             body['message'] = response.message
     elif path == '/list_keys':
-        key_data = defaultdict(dict)
+        key_data = {'keys': []}
         for key in r.keys():
-            key_data['name'] = key
-            key_data['value'] = str(r.get(key))
-            key_data['ttl'] = int(r.ttl(key))
+            key_data['keys'].append({
+                'name': key,
+                'value': r.get(key),
+                'ttl': r.ttl(key)
+            })
 
         return {
             'statusCode': 200,
             'headers': {
                 'Content-Type': 'application/json'
             },
-            'body': f'keys: {json.dumps(key_data)}'
+            'body': key_data
         }
     elif path == '/clear_cache':
         for key in r.keys('survey:*'):
