@@ -32,7 +32,6 @@ thresholds = {
 
 
 # match incoming path to ascertain resource
-# pattern=re.compile(r'^/(survey)(?:/)?(?:/\d*)?/(interview)(?:/)?(?:/\d*)/(attachment)(?:/)?(?:\d*)?')
 pattern = r'/([a-zA-Z]+)'
 
 r = redis.Redis(
@@ -72,7 +71,7 @@ def handler(event, context):
             body['message'] = response.message
     elif path == '/list_keys':
         key_data = {'keys': []}
-        for key in r.keys():
+        for key in sorted(r.keys()):
             key_data['keys'].append({
                 'name': key,
                 'value': r.get(key),
@@ -126,7 +125,7 @@ def get_response(location: str, api_key: str) -> namedtuple:
         response = Response(status_code=200, data={'data': 'something'}, key=key, quota=0,
                             message=f'quota exceeded at {location}')
     else:
-        new_key_value = int(decrement_key(key))
+        new_key_value = decrement_key(key)
         response = Response(status_code=200, data={'data': 'something'}, key=key, quota=new_key_value, message='ok')
 
     return response
@@ -161,9 +160,12 @@ def set_expiry_and_quota(key: str) -> None:
     """
     expiration = thresholds['global']['interval']
     quota = key_quota(key)
-    r.set(key, quota)
-    r.expire(key, expiration)  # set ttl
-    LOG.info(f'setting key {key} value to {quota} and expiration {expiration}')
+    # could use a pipeline here to make atomic
+    pipeline = r.pipeline().set(key, quota).expire(key, expiration)
+    pipeline.execute()
+    # r.set(key, quota)
+    # r.expire(key, expiration)  # set ttl
+    LOG.info(f'set key {key} value to {quota} and expiration {expiration}')
 
 
 def key_value(key: str)-> int:
@@ -184,6 +186,7 @@ def key_value(key: str)-> int:
             set_expiry_and_quota(key)
 
     return r.get(key)
+
 
 def make_key(path: str, api_key: str)-> str:
     """
@@ -234,4 +237,4 @@ def decrement_key(key: str) -> int:
     # decrement leaf key
     value = key_value(key)
     r.decr(key)
-    return value
+    return int(value)

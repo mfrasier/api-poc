@@ -1,9 +1,9 @@
 {
   "body": "eyJ0ZXN0IjoiYm9keSJ9",
   "resource": "/{proxy+}",
-  "path": "/list_keys",
+  "path0": "/list_keys",
   "path1": "/delete_keys",
-  "path2": "/survey/1/interview/1/attachment/1",
+  "path": "/survey/1/interview/1/attachment/1",
   "path3": "/survey/1/interview/1",
   "path4": "/survey/1",
   "httpMethod": "POST",
