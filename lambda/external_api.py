@@ -21,13 +21,13 @@ thresholds = {
         'interval': 60,
     },
     'survey': {
-        'count': 50
+        'count': 20
     },
     'survey:interview': {
-        'count': 25
+        'count': 10
     },
     'survey:interview:attachment': {
-        'count': 10
+        'count': 5
     }
 }
 
@@ -99,7 +99,7 @@ def get_response(location: str, api_key: str) -> namedtuple:
         response = Response(status_code=200, data={'data': 'something'}, key=key, quota=0,
                             message=f'quota exceeded at {location}')
     else:
-        new_key_value = decrement_key(key)
+        new_key_value = int(decrement_key(key))
         response = Response(status_code=200, data={'data': 'something'}, key=key, quota=new_key_value, message='ok')
 
     return response
@@ -112,21 +112,41 @@ def quota_exceeded(key:str)-> 'tuple':
     :return: True if quota exceeded, otherwise False
     """
     resources, api_key = list(key.split(':')[:-1]), key.split(':')[-1:][0]
+
+    LOG.info(f'resources: {resources}')
     for end in range(len(resources) - 1, 0, -1):
         parent_key = ':'.join([*resources[:-end], api_key])
-        LOG.info(f'checking exceeded quota for resource_key: {parent_key}')
-        quota = r.get(parent_key)
-        LOG.info(f'quota for {parent_key}={quota}')
-        if quota is not None and int(quota) <= 0:
+        LOG.debug(f'checking exceeded quota for resource_key: {parent_key}')
+        parent_quota = key_value(parent_key)
+        LOG.debug(f'quota for {parent_key}={parent_quota}')
+        if parent_quota is not None and int(parent_quota) == 0:
             return True, parent_key
 
-    quota = r.get(key)
-    LOG.info(f'quota for {key}={quota}')
+    quota = key_value(key)
+    LOG.debug(f'quota for {key}={quota}')
     if quota is not None and int(r.get(key)) <= 0:
         return True, key
 
-    return False, None
+    return False, key
 
+
+def key_value(key: str)-> int:
+    """
+    get value of key
+    if key doesn't exist
+      create it with threshold value
+      set expiration
+    :param key:
+    :return: value of key
+    """
+    if r.get(key) is None:
+        expiration = thresholds['global']['interval']
+        quota = key_quota(key)
+        LOG.info(f'key {key} does not exist - setting value to {quota} and expiration {expiration}')
+        r.set(key, quota)
+        r.expire(key, expiration)  # set ttl
+
+    return int(r.get(key))
 
 def make_key(path: str, api_key: str)-> str:
     """
@@ -137,7 +157,7 @@ def make_key(path: str, api_key: str)-> str:
     """
     path_parts = re.findall(pattern, path)
     key = ':'.join([*path_parts, api_key])
-    LOG.info('redis key={}'.format(key))
+    LOG.debug('redis key={}'.format(key))
     return key
 
 
@@ -147,11 +167,11 @@ def key_quota(key: str)-> int:
     :param key: key name
     :return: int showing quota count or -1 if not defined
     """
-    # resource_key = ':'.join(key.split(':')[:-1])  # strip off api_key
+    resource_key = ':'.join(key.split(':')[:-1])  # strip off api_key
     try:
-        quota = thresholds[key]['count']
+        quota = thresholds[resource_key]['count']
     except KeyError as e:
-        LOG.info('resource_key {} not found in thresholds'.format(key))
+        LOG.info('resource_key {} not found in thresholds'.format(resource_key))
         quota = -1
 
     return quota
@@ -169,23 +189,15 @@ def decrement_key(key: str) -> int:
     resources, api_key = list(key.split(':')[:-1]), key.split(':')[-1:][0]
     for end in range(len(resources) - 1, 0, -1):
         parent_key = ':'.join([*resources[:-end], api_key])
-        LOG.info(f'decrementing parent resource_key: {parent_key}')
         if r.exists(parent_key):
-            LOG.info(f'decrementing parent key {parent_key}')
+            LOG.debug(f'decrementing parent key {parent_key}')
             r.decr(parent_key)
         else:
-            quota = key_quota(parent_key)
-            LOG.info(f'set initial parent key value {parent_key}={quota}')
-            r.set(parent_key, quota)
-            r.expire(parent_key, thresholds['global']['interval'])  # set ttl
+            key_value(parent_key)
+            LOG.debug(f'decrementing new parent key {parent_key}')
             r.decr(parent_key)
 
     # decrement leaf key
-    if not r.exists(key):
-        quota = key_quota(key)
-        LOG.info(f'set initial leaf key value {key}={quota}')
-        r.set(parent_key, quota)
-        r.expire(key, thresholds['global']['interval'])  # set ttl
-
-    LOG.info(f'decrementing leaf key {key}')
-    return r.decr(key)
+    value = key_value(key)
+    r.decr(key)
+    return value
