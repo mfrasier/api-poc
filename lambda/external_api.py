@@ -2,10 +2,9 @@ import json
 import os
 import logging
 import re
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 import redis
-import boto3
 
 """
 Simulate an external RESTful API service with client throttling
@@ -70,6 +69,31 @@ def handler(event, context):
         else:
             body['status_code'] = 429
             body['message'] = response.message
+    elif path == '/list_keys':
+        key_data = defaultdict(dict)
+        for key in r.keys():
+            key_data['name'] = key
+            key_data['value'] = str(r.get(key))
+            key_data['ttl'] = int(r.ttl(key))
+
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json'
+            },
+            'body': f'keys: {json.dumps(key_data)}'
+        }
+    elif path == '/clear_cache':
+        for key in r.keys('survey:*'):
+            r.delete(key)
+            LOG.info('deleted key {}'.format(key))
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json'
+                },
+                'body': 'cache cleared of keys matching survey:*'
+            }
     else:
         body = {
             'status_code': 400,

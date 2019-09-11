@@ -1,10 +1,8 @@
 from aws_cdk import (
     aws_lambda as _lambda,
-    aws_dynamodb as dynamodb,
     aws_apigateway as apigw,
     aws_elasticache as elasticache,
     aws_ec2 as ec2,
-    aws_iam as iam,
     core
 )
 
@@ -15,9 +13,9 @@ class ExternalApi(core.Construct):
     """
     define our external API construct
     """
-    # @property
-    # def handler(self):
-    #     return self.api_handler
+    @property
+    def api_gateway(self):
+        return self.api_gateway
 
     @property
     def redis_address(self):
@@ -82,7 +80,7 @@ class ExternalApi(core.Construct):
         api_handler.add_environment('REDIS_PORT', self.redis_port)
 
         # API Gateway frontend to simulator lambda
-        external_gateway = apigw.LambdaRestApi(
+        self.external_gateway = apigw.LambdaRestApi(
             self, 'external_api',
             handler=api_handler,
             proxy=True
