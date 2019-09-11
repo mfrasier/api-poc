@@ -84,7 +84,7 @@ def handler(event, context):
             'headers': {
                 'Content-Type': 'application/json'
             },
-            'body': key_data
+            'body': json.dumps(key_data)
         }
     elif path == '/clear_cache':
         for key in r.keys('survey:*'):
