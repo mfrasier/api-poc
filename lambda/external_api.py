@@ -153,6 +153,19 @@ def quota_exceeded(key:str)-> 'tuple':
     return False, key
 
 
+def set_expiry_and_quota(key: str) -> None:
+    """
+
+    :param key: key string
+    :return: nothing
+    """
+    expiration = thresholds['global']['interval']
+    quota = key_quota(key)
+    r.set(key, quota)
+    r.expire(key, expiration)  # set ttl
+    LOG.info(f'setting key {key} value to {quota} and expiration {expiration}')
+
+
 def key_value(key: str)-> int:
     """
     get value of key
@@ -162,14 +175,15 @@ def key_value(key: str)-> int:
     :param key: the key
     :return: value of key
     """
-    if r.get(key) is None:
-        expiration = thresholds['global']['interval']
-        quota = key_quota(key)
-        LOG.info(f'key {key} does not exist - setting value to {quota} and expiration {expiration}')
-        r.set(key, quota)
-        r.expire(key, expiration)  # set ttl
+    if not r.exists(key):
+        LOG.info(f'key {key} does not exist - setting value and expiration')
+        set_expiry_and_quota(key)
+    else:
+        if r.ttl(key) == -1:
+            LOG.info(f'key {key} exists but has no expiry - setting value and expiration')
+            set_expiry_and_quota(key)
 
-    return int(r.get(key))
+    return r.get(key)
 
 def make_key(path: str, api_key: str)-> str:
     """
