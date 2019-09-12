@@ -2,16 +2,16 @@ from aws_cdk import (
     core
 )
 
-from external_api_construct import ExternalApi
+from core_infra_construct import CoreInfrastructure
 
 
-class ApiPocStack(core.Stack):
+class CoreStack(core.Stack):
     """
-    external api server stack
+    core stack
     """
     def __init__(self, scope: core.Construct, id: str, **kwargs) -> None:
         """ create our stack """
         super().__init__(scope, id, **kwargs)
 
-        # external api construct
-        ExternalApi(self, 'ExternalApi')
+        # api consumer construct
+        CoreInfrastructure(self, 'CoreInfrastructure')

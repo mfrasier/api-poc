@@ -20,9 +20,6 @@ r = redis.Redis(
     decode_responses=True
 )
 
-queue_arn = os.environ['SQS_ARN']
-sqs = boto3.client('sqs')
-
 
 def handler(event, context):
     """
@@ -30,11 +27,26 @@ def handler(event, context):
     event contains dict from api gateway request
     """
     LOG.info('request: {}'.format(json.dumps(event)))
-    LOG.info('queue_arn={}'.format(queue_arn))
+    queue_url = os.environ['SQS_URL']
+    LOG.info('queue_url={}'.format(queue_url))
+
+    throttle_state = hydrate_state()
+    sqs = boto3.resource('sqs')
+    work_queue = sqs.Queue(queue_url)
+    process_messages(work_queue)
 
 
-def process_messages(queue_arn: str) -> None:
-    pass
+def process_messages(queue: 'Queue') -> None:
+    messages = queue.receive_messages(MaxNumberOfMessages=10)
+    LOG.info(messages)
 
 
-def hydrate_state() -> None:
+def hydrate_state() -> dict:
+    state = {}
+    keys = r.keys('survey:*')
+
+    # could use lock or pipeline here if it becomes necessary
+    for key in keys:
+        state['key'] = {'name': key, 'value': r.get(key), 'ttl': r.ttl(key)}
+
+    return state

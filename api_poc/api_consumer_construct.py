@@ -7,8 +7,11 @@ from aws_cdk import (
     core
 )
 
+from company_infra_construct import CompanyInfrastructure
+from core_infra_construct import CoreInfrastructure
 
-class ApiConsumer(core.Construct):
+
+class ApiConsumer(CompanyInfrastructure):
     """api consumer construct"""
     def __init__(self, scope: core.Construct, id: str, **kwargs):
         super().__init__(scope, id, **kwargs)
@@ -16,25 +19,21 @@ class ApiConsumer(core.Construct):
         job_queue = sqs.Queue(
             self, 'job_queue')
 
-        # TODO create a shared construct with VPC, sg, queue, etc shared infrastructure
-        vpc = ec2.Vpc.from_lookup(
-            self, 'my_vpc',
-            vpc_name='MyVPC1'
-        )
-
         orchestrator = _lambda.Function(
             self, 'orchestrator',
             runtime=_lambda.Runtime.PYTHON_3_7,
             code=_lambda.Code.asset('lambda'),
             handler='orchestrator.handler',
-            vpc=vpc,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE),
-            security_group=ec2.SecurityGroup.from_security_group_id(
-                self, 'default_sg',
-                security_group_id='sg-9d857bf9'
-            )
+            layers=[CompanyInfrastructure.python3_lib_layer],
+            vpc=CompanyInfrastructure.vpc,
+            vpc_subnets=CompanyInfrastructure.vpc_subnets,
+            security_group=CompanyInfrastructure.security_group,
+            tracing=_lambda.Tracing.ACTIVE,
         )
-        orchestrator.add_environment('SQS_ARN', job_queue.queue_arn)
+        orchestrator.add_environment('SQS_URL', job_queue.queue_url)
+        orchestrator.add_environment('REDIS_ADDRESS', self.redis_address)
+        orchestrator.add_environment('REDIS_PORT', self.redis_port)
+
         job_queue.grant_consume_messages(orchestrator)
 
         # kick off lambda once per interval

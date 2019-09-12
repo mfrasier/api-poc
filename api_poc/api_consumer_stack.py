@@ -1,7 +1,5 @@
 
 from aws_cdk import (
-    # aws_events as events,
-    # aws_events_targets as targets,
     core
 )
 
@@ -16,5 +14,5 @@ class ApiConsumerStack(core.Stack):
         """ create our stack """
         super().__init__(scope, id, **kwargs)
 
-        # external api construct
-        external_api = ApiConsumer(self, 'ApiConsumer')
+        # api consumer construct
+        ApiConsumer(self, 'ApiConsumer')
