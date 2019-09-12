@@ -4,12 +4,11 @@ from aws_cdk import (
     core,
 )
 
-import redis
-
-from api_poc.api_poc_stack import ApiPocStack
-from api_consumer_stack import ApiConsumerStack
+from uber_stack import UberStack
 
 app = core.App()
-ApiPocStack(app, "api-poc-mfrasier", env={'region': 'us-east-1', 'account': '011955760856', 'env': 'dev'})
-ApiConsumerStack(app, 'api-consumer-mfrasier', env={'region': 'us-east-1', 'account': '011955760856', 'env': 'dev'})
+
+UberStack(app, 'api-uberstack-mfrasier',
+                 env={'region': 'us-east-1', 'account': '011955760856', 'env': 'dev'})
+
 app.synth()
