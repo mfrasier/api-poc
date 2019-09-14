@@ -27,26 +27,31 @@ def handler(event, context):
     event contains dict from api gateway request
     """
     LOG.info('request: {}'.format(json.dumps(event)))
+
+    sqs = boto3.resource('sqs')
     queue_url = os.environ['SQS_URL']
     LOG.info('queue_url={}'.format(queue_url))
+    work_queue = sqs.Queue(queue_url)
 
     throttle_state = hydrate_state()
-    sqs = boto3.resource('sqs')
-    work_queue = sqs.Queue(queue_url)
-    process_messages(work_queue)
+    # process_messages(work_queue)
 
 
 def process_messages(queue: 'Queue') -> None:
+    LOG.info('getting messages from work queue')
     messages = queue.receive_messages(MaxNumberOfMessages=10)
-    LOG.info(messages)
+    LOG.info('received {} messages from work queue '.format(len(messages), queue))
+    LOG.info('messages: {}'.format(messages))
 
 
 def hydrate_state() -> dict:
-    state = {}
+    state = []
+    LOG.info('rehydrating current throttle state')
     keys = r.keys('survey:*')
 
     # could use lock or pipeline here if it becomes necessary
     for key in keys:
-        state['key'] = {'name': key, 'value': r.get(key), 'ttl': r.ttl(key)}
+        state.append({'name': key, 'value': r.get(key), 'ttl': r.ttl(key)})
 
+    LOG.info('hydrated state: {}'.format(state))
     return state
