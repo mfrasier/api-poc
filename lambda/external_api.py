@@ -99,7 +99,7 @@ def handler(event, context):
     else:
         body = {
             'status_code': 400,
-            'message': f"'{path}' is not a valid resource"
+            'message': f"'{path}' is not a valid resource.  Try /survey/1/interview/1/attachment/1 or /list_keys"
         }
 
     return {

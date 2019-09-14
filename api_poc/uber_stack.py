@@ -9,6 +9,8 @@ from aws_cdk import (
     core
 )
 
+import sys
+
 
 class UberStack(core.Stack):
     @property
@@ -23,17 +25,19 @@ class UberStack(core.Stack):
         super().__init__(scope, id, **kwargs)
 
         # shared stuff
-        self._vpc = ec2.Vpc.from_lookup(
-            self, 'my_vpc',
-            vpc_name='MyVPC1'
+        self._vpc = ec2.Vpc(
+            self, 'api_poc-vpc',
+            cidr = '10.0.0.0/23',
+            max_azs=1,
+            nat_gateways=1,
         )
 
-        self._vpc_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE)
-
+        self._private_subnet_selection = self._vpc.select_subnets(
+            subnet_type=ec2.SubnetType.PRIVATE
+        )
         self._security_group = ec2.SecurityGroup.from_security_group_id(
-            self, 'default-sg',
-            security_group_id='sg-9d857bf9'
-        )
+            self, 'default_sg',
+            security_group_id=self._vpc.vpc_default_security_group)
 
         # TODO someday, create the layer from local zip file
         self._python3_lib_layer = _lambda.LayerVersion.from_layer_version_arn(
@@ -42,10 +46,11 @@ class UberStack(core.Stack):
         )
 
         # redis cache cluster
-        cache_subnet_group = elasticache.CfnSubnetGroup(
+        self._cache_subnet_group = elasticache.CfnSubnetGroup(
             self, 'subnet_group',
             description='elasticache subnet group',
-            subnet_ids=['subnet-909a58bb']
+            subnet_ids= self._private_subnet_selection.subnet_ids,
+            cache_subnet_group_name='cache-subnet-group'
         )
 
         self._redis_cache = elasticache.CfnCacheCluster(
@@ -53,9 +58,10 @@ class UberStack(core.Stack):
             cache_node_type='cache.t2.micro',
             num_cache_nodes=1,
             engine='redis',
-            cache_subnet_group_name=cache_subnet_group.ref,
-            vpc_security_group_ids=['sg-9d857bf9'],
+            cache_subnet_group_name=self._cache_subnet_group.cache_subnet_group_name,
+            vpc_security_group_ids=[self._security_group.security_group_id],
         )
+        self._redis_cache.add_depends_on(self._cache_subnet_group)
 
         # stack output
         core.CfnOutput(
@@ -66,13 +72,13 @@ class UberStack(core.Stack):
 
         # external API simulator lambda
         api_handler = _lambda.Function(
-            self, "ExternalApiHandler",
+            self, "external-api-handler",
             runtime=_lambda.Runtime.PYTHON_3_7,
             code=_lambda.Code.asset('lambda'),
             handler='external_api.handler',
             layers=[self._python3_lib_layer],
             vpc=self._vpc,
-            vpc_subnets=self._vpc_subnets,
+            vpc_subnets=self._private_subnet_selection,
             security_group=self._security_group,
             tracing=_lambda.Tracing.ACTIVE
         )
@@ -90,14 +96,21 @@ class UberStack(core.Stack):
         job_queue = sqs.Queue(
             self, 'job_queue')
 
+        sqs_service_endpoint = ec2.InterfaceVpcEndpoint(
+            self, 'sqs-service-endpoint',
+            vpc=self._vpc,
+            service=ec2.InterfaceVpcEndpointAwsService(name='sqs')
+        )
+
         orchestrator = _lambda.Function(
-            self, 'orchestrator',
+            self, 'orchestrator-handler',
             runtime=_lambda.Runtime.PYTHON_3_7,
             code=_lambda.Code.asset('lambda'),
             handler='orchestrator.handler',
             layers=[self._python3_lib_layer],
+            reserved_concurrent_executions=1,
             vpc=self._vpc,
-            vpc_subnets=self._vpc_subnets,
+            vpc_subnets=self._private_subnet_selection,
             security_group=self._security_group,
             tracing=_lambda.Tracing.ACTIVE,
         )
