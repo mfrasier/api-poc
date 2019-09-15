@@ -24,7 +24,7 @@ r = redis.Redis(
 def handler(event, context):
     """
     main entry point
-    event contains dict from api gateway request
+    event contains dict from cloudwatch rule (content ignored - just triggers)
     """
     LOG.info('request: {}'.format(json.dumps(event)))
 
@@ -34,14 +34,30 @@ def handler(event, context):
     work_queue = sqs.Queue(queue_url)
 
     throttle_state = hydrate_state()
-    # process_messages(work_queue)
+    process_messages(work_queue)
 
 
 def process_messages(queue: 'Queue') -> None:
     LOG.info('getting messages from work queue')
-    messages = queue.receive_messages(MaxNumberOfMessages=10)
+    messages = queue.receive_messages(
+        AttributeNames=['All'],
+        MaxNumberOfMessages=10,
+        VisibilityTimeout=10,
+    )
     LOG.info('received {} messages from work queue '.format(len(messages), queue))
-    LOG.info('messages: {}'.format(messages))
+
+    for message in messages:
+        LOG.info('message id: {}'.format(message.message_id))
+        LOG.info('message body: {}'.format(message.body))
+        # attributes
+        # body
+        # md5_of_body
+        # md5_of_message_attributes
+        # message_attributes
+        # message_id
+
+        # process message
+        # delete() if all went well
 
 
 def hydrate_state() -> dict:

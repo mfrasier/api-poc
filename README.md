@@ -243,7 +243,39 @@ There were no differences
 
 The results of the `diff` operation will be very different from the above if 
 the stack is not yet deployed.  It will show all the changes necessary to 
-deploy the new stack. 
+deploy the new stack.
+
+This is an example showing required changes where a security group, 
+cloudwatch rule, and lambda code were updated locally. 
+
+```
+$ cdk diff
+The api-uberstack-dev stack uses assets, which are currently not accounted for in the diff output! See https://github.com/aws/aws-cdk/issues/395
+Security Group Changes
+┌───┬─────────────────────────────────────┬─────┬──────────┬─────────────────────────────────────┐
+│   │ Group                               │ Dir │ Protocol │ Peer                                │
+├───┼─────────────────────────────────────┼─────┼──────────┼─────────────────────────────────────┤
+│ + │ ${api_poc-vpc.DefaultSecurityGroup} │ In  │ TCP 6379 │ ${api_poc-vpc.DefaultSecurityGroup} │
+└───┴─────────────────────────────────────┴─────┴──────────┴─────────────────────────────────────┘
+(NOTE: There may be security-related changes not in this list. See http://bit.ly/cdk-2EhF7Np)
+
+Resources
+[+] AWS::EC2::SecurityGroupIngress default_sg/from apiuberstackdevdefaultsg65F5F0FA:6379-6379 defaultsgfromapiuberstackdevdefaultsg65F5F0FA63796379ECAEC424
+[~] AWS::Lambda::Function external-api-handler externalapihandler82E49736
+ └─ [~] Metadata
+     └─ [~] .aws:asset:path:
+         ├─ [-] asset.227b28977e5cbf23ce15712e33374fa7f79bcc92404c009c3115bd70082515cb
+         └─ [+] asset.2c823498c0fd1e30130860ca4ac5337071caf601d16634d83bb03e426a2c313e
+[~] AWS::Lambda::Function orchestrator-handler orchestratorhandler84D948A3
+ └─ [~] Metadata
+     └─ [~] .aws:asset:path:
+         ├─ [-] asset.227b28977e5cbf23ce15712e33374fa7f79bcc92404c009c3115bd70082515cb
+         └─ [+] asset.2c823498c0fd1e30130860ca4ac5337071caf601d16634d83bb03e426a2c313e
+[~] AWS::Events::Rule orchestrator_rule orchestratorruleC0505227
+ └─ [~] ScheduleExpression
+     ├─ [-] cron(0/5 * ? * MON-FRI *)
+     └─ [+] cron(0/10 * ? * * *)
+```
 
 ### Deploy the stack
 This command attempts to modify your deployed stack to conform to your defined stack.
@@ -272,7 +304,7 @@ This deletes your deployed stack.
 
 ## Test deployed stack
 
-### Invoke deployed lambda directly
+### Invoke deployed API handler lambda directly
 This invokes the deployed lambda directly, without the API Gateway intermediary.  
 Useful for troubleshooting gateway errors - status code 502, etc - 
 to more directly view the likely lambda issue. 
@@ -307,13 +339,13 @@ See above for valid resource or admin paths to append.
 A couple of examples:
 
 ```bash
-$ curl https://e3ryyap5mf.execute-api.us-east-1.amazonaws.com/prod/survey/1/interview/1/attachment/1
+$ curl -XGET https://e3ryyap5mf.execute-api.us-east-1.amazonaws.com/prod/survey/1/interview/1/attachment/1
 
 {"data": {"data": "something"}, "quota": 5, "status_code": 200, "message": ["Hello, CDK!  You have hit /survey/1/interview/1/attachment/1\n"]}
 ```
 
 ```bash
-$ curl https://e3ryyap5mf.execute-api.us-east-1.amazonaws.com/prod/list_keys
+$ curl -XGET https://e3ryyap5mf.execute-api.us-east-1.amazonaws.com/prod/list_keys
 
 {"keys": [{"name": "survey:interview:attachment:none", "value": "4", "ttl": 57}, {"name": "survey:interview:none", "value": "9", "ttl": 57}, {"name": "survey:none", "value": "19", "ttl": 57}]}
 ```

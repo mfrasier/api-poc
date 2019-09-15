@@ -39,6 +39,12 @@ class UberStack(core.Stack):
             self, 'default_sg',
             security_group_id=self._vpc.vpc_default_security_group)
 
+        self._security_group.add_ingress_rule(
+            description='redis',
+            peer=self._security_group,
+            connection=ec2.Port.tcp_range(start_port=6379, end_port=6379)
+        )
+
         # TODO someday, create the layer from local zip file
         self._python3_lib_layer = _lambda.LayerVersion.from_layer_version_arn(
             self, 'python3-lib-layer',
@@ -125,10 +131,10 @@ class UberStack(core.Stack):
         rule = events.Rule(
             self, 'orchestrator_rule',
             schedule=events.Schedule.cron(
-                minute='0/5',
+                minute='0/10',
                 hour='*',
                 month='*',
-                week_day='MON-FRI',
+                week_day='*',
                 year='*'
             )
         )

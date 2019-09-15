@@ -2,6 +2,8 @@
 
 # TODO
 # restrict API Gateway access to our VPC
+# create a separate security group for the redis cluster, allowing access from main sg
+# probably don't want to use default sg at all
 
 from aws_cdk import (
     core,
