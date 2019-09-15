@@ -51,7 +51,21 @@ def handler(event, context):
 
     api_key = 'none'  # using empty api_key for now
     path = event['path']
-    LOG.info(f"path='{path}'")
+    httpMethod = event['httpMethod']
+    LOG.info(f"path='{path}', method={httpMethod}")
+
+    if httpMethod != 'GET':
+        response = {
+            'status_code': 405,
+            'message': f"HTTP method '{httpMethod}' is not a supported method.  Try GET"
+        }
+        return {
+            'statusCode': 405,
+            'headers': {
+                'Content-Type': 'application/json'
+            },
+            'body': json.dumps(response)
+        }
 
     if path.startswith('/survey'):
         response = get_response(location=path, api_key=api_key)
