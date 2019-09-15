@@ -47,7 +47,7 @@ class UberStack(core.Stack):
 
         # redis cache cluster
         self._cache_subnet_group = elasticache.CfnSubnetGroup(
-            self, 'subnet_group',
+            self, 'cache_subnet_group',
             description='elasticache subnet group',
             subnet_ids= self._private_subnet_selection.subnet_ids,
             cache_subnet_group_name='cache-subnet-group'
@@ -58,7 +58,7 @@ class UberStack(core.Stack):
             cache_node_type='cache.t2.micro',
             num_cache_nodes=1,
             engine='redis',
-            cache_subnet_group_name=self._cache_subnet_group.cache_subnet_group_name,
+            cache_subnet_group_name='cache-subnet-group',
             vpc_security_group_ids=[self._security_group.security_group_id],
         )
         self._redis_cache.add_depends_on(self._cache_subnet_group)
