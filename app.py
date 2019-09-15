@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# TODO
+# restrict API Gateway access to our VPC
+
 from aws_cdk import (
     core,
 )
