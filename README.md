@@ -31,6 +31,38 @@ An SQS interface endpoint is defined to allow private communication to SQS.
 
 ### Lamda functions
 
+#### Orchestrator
+The orchestrator application coordinates the workers in an attempt to manage the 
+throttling behavior.  
+
+It is triggered at an interval by a cloudwatch event, hydrates quota state from database, 
+
+If an API is throttled (circuit breaker open) it invokes a worker with a health check
+ message to test API operation and update circuit breaker status to closed if quota
+ has been lifted. 
+
+If API circuit breaker is closed the function reads work messages from the work queue, 
+invoking worker functions to perform work.
+
+#### Worker
+The orchestrator invokes this function, sending the work instructions as payload.
+
+There are two types of messages
+
+* Work instructions instruct the function to consume data from the 
+external API and perform some work. 
+If the API call is throttled, the worker toggles the circuit breaker status 
+to open.  
+(not implemented as of Sep 17. SNS sounds like a good way to do this - can also
+send notifications to slack, etc).
+
+* Health check messages instruct the worker to query the API quota status and effect
+a circuit breaker state change from open to closed if quota has been lifted.  
+
+#### Task Master
+This function emulates an upstream business process putting work on the work queue
+for consumption by the orchestrator.
+ 
 #### External API server emulator
 This service emulates a RESTful API server throttling API calls  
  and is the target for our workers who are performing actual business logic.
@@ -66,21 +98,7 @@ and the response will indicate the resource path location where it hit the throt
 
 ##### Management
 
-The `/list_keys` endpoint can be used to view the current contents of the throttling db.
-
-`/clear_cache` will delete the keys in the throttling db.
-It is of limited use with a small key ttl as all the keys will expire when the ttl is reached. 
-
-#### Worker
-The worker applications consume data from the external API and perform some work.
-
-Sep 15: They are not currently implemented.
-
-#### Orchestrator
-The orchestrator application coordinates the workers in an attempt to manage the 
-throttling behavior.  
-
-Sep 15: It is minimally implemented as the API server but doesn't do much else yet. 
+The `/keys` endpoint can be used to view the current contents of the quota db. 
 
 ### Redis cluster
 There is a tiny AWS Elasticache redis cluster hosted in the VPC for tracking

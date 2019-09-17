@@ -83,7 +83,7 @@ def handler(event, context):
         else:
             body['status_code'] = 429
             body['message'] = response.message
-    elif path == '/list_keys':
+    elif path == '/keys':
         key_data = {'keys': []}
         for key in sorted(r.keys()):
             key_data['keys'].append({
