@@ -79,7 +79,7 @@ class UberStack(core.Stack):
 
         # external API simulator lambda
         api_handler = _lambda.Function(
-            self, "external-api-handler",
+            self, "external-api",
             runtime=_lambda.Runtime.PYTHON_3_7,
             code=_lambda.Code.asset('lambda'),
             handler='external_api.handler',
@@ -95,13 +95,27 @@ class UberStack(core.Stack):
         # API Gateway frontend to simulator lambda
         self._api_gateway = apigw.LambdaRestApi(
             self, 'external_api',
+            description='external API emulator',
+            options=apigw.StageOptions(
+                stage_name='dev'
+            ),
             handler=api_handler,
             proxy=True
         )
 
-        # job queue
+        job_dlq = sqs.Queue(
+            self, 'job-dlq')
+
         job_queue = sqs.Queue(
-            self, 'job_queue')
+            self, 'job-queue',
+            dead_letter_queue=sqs.DeadLetterQueue(
+                queue=job_dlq,
+                max_receive_count=3
+            )
+        )
+
+        worker_dlq = sqs.Queue(
+            self, 'worker-dlq')
 
         sqs_service_endpoint = ec2.InterfaceVpcEndpoint(
             self, 'sqs-service-endpoint',
@@ -116,17 +130,18 @@ class UberStack(core.Stack):
             handler='worker.handler',
             layers=[self._python3_lib_layer],
             reserved_concurrent_executions=20,
+            dead_letter_queue=worker_dlq,
             vpc=self._vpc,
             vpc_subnets=self._private_subnet_selection,
             security_group=self._security_group,
             tracing=_lambda.Tracing.ACTIVE,
         )
-        worker.add_environment('SQS_URL', job_queue.queue_url)
+        worker.add_environment('JOB_QUEUE_URL', job_queue.queue_url)
         worker.add_environment('REDIS_ADDRESS', self.redis_address)
         worker.add_environment('REDIS_PORT', self.redis_port)
 
         orchestrator = _lambda.Function(
-            self, 'orchestrator-handler',
+            self, 'orchestrator',
             runtime=_lambda.Runtime.PYTHON_3_7,
             code=_lambda.Code.asset('lambda'),
             handler='orchestrator.handler',
@@ -137,18 +152,20 @@ class UberStack(core.Stack):
             security_group=self._security_group,
             tracing=_lambda.Tracing.ACTIVE,
         )
-        orchestrator.add_environment('SQS_URL', job_queue.queue_url)
+        orchestrator.add_environment('JOB_QUEUE_URL', job_queue.queue_url)
+        orchestrator.add_environment('JOB_DLQ_URL', job_dlq.queue_url)
         orchestrator.add_environment('REDIS_ADDRESS', self.redis_address)
         orchestrator.add_environment('REDIS_PORT', self.redis_port)
         orchestrator.add_environment('WORKER_FUNCTION_ARN', worker.function_arn)
         job_queue.grant_consume_messages(orchestrator)
+        job_dlq.grant_send_messages(orchestrator)
 
-        worker.add_permission(
-            id='orchestrator_invoke',
+        orchestrator.add_permission(
+            id='invoke-worker',
             principal=iam.ServicePrincipal(
                 service='lambda.amazonaws.com'
             ),
-            source_arn=orchestrator.function_arn,
+            source_arn=worker.function_arn,
         )
 
         task_master = _lambda.Function(

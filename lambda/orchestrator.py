@@ -21,11 +21,13 @@ r = redis.Redis(
 )
 
 sqs = boto3.resource('sqs')
-queue_url = os.environ['SQS_URL']
-LOG.info('queue_url={}'.format(queue_url))
-work_queue = sqs.Queue(queue_url)
+work_queue_url = os.environ['JOB_QUEUE_URL']
+work_dlq_url = os.environ['JOB_DLQ_URL']
+LOG.info('queue_url={}'.format(work_queue_url))
+work_queue = sqs.Queue(work_queue_url)
+work_dlq = sqs.Queue(work_dlq_url)
 
-_lambda = boto3.resource('lambda')
+_lambda = boto3.client('lambda')
 worker_arn = os.environ['WORKER_FUNCTION_ARN']
 
 
@@ -40,7 +42,7 @@ def handler(event, context):
 
 
 def process_messages(queue: 'Queue') -> None:
-    LOG.info('getting messages from work queue')
+    LOG.info('getting messages from work queue {}'.format(work_queue_url))
     messages = queue.receive_messages(
         AttributeNames=['All'],
         MaxNumberOfMessages=10,
