@@ -215,6 +215,8 @@ run lambda locally.
 sam local invoke externalapihandler7E50D66D --event ./apigateway_event.json  --env-vars env.json
 ```
 
+The other lambdas can be tested locally in a similar fashion.
+
 You can also start up API Gateway using SAM local but that's not covered here.
 
 ## Stack operations with the AWS CDK
@@ -350,6 +352,8 @@ $ aws lambda invoke \
 The log is base64-encoded in case you need to view it.
 
 Output returned from lambda is in file `lambda.out` 
+
+The other lambdas can be tested in a similar fashion.
 
 ### External api server
 Call the api handler lambda via the API Gateway endpoint to emulate an external API server.

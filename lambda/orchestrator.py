@@ -9,6 +9,8 @@ import redis
 job orchestrator
 invoked on schedule by cloudwatch event
 read messages from job_queue, invoke task worker lambdas
+TODO: manage API state - set state for any api_id encountered and not in hydrated state.
+TODO: check state periodically in case workers have updated it, (update?)
 """
 
 LOG = logging.getLogger()
@@ -41,7 +43,7 @@ def handler(event, context):
     process_messages(work_queue)
 
 
-def _receive_messages(queue: 'boto3.SQS.Queue', count: int = 10) -> list['boto3.SQS.Message']:
+def _receive_messages(queue: 'boto3.SQS.Queue', count: int = 10) -> list:
     return queue.receive_messages(
         AttributeNames=['All'],
         MaxNumberOfMessages=count,
@@ -57,10 +59,9 @@ def process_messages(queue: 'boto3.SQS.Queue') -> None:
     while len(messages) > 0:
         for message in messages:
             LOG.info('message id: {}'.format(message.message_id))
-            LOG.info('message body: {}'.format(message.body))
 
             # process message
-            LOG.info('invoking lambda function {}'.format(worker_arn))
+            LOG.info('invoking lambda function {} with message: {}'.format(worker_arn, message.body))
             response = _lambda.invoke(
                 FunctionName=worker_arn,
                 InvocationType='Event', # async
@@ -76,7 +77,7 @@ def process_messages(queue: 'boto3.SQS.Queue') -> None:
 def hydrate_state() -> dict:
     state = []
     LOG.info('rehydrating current throttle state')
-    keys = r.keys('quota:*')
+    keys = r.keys('*.state')
 
     # could use lock or pipeline here if it becomes necessary
     for key in keys:

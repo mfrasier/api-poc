@@ -40,6 +40,7 @@ def handler(event, context):
 def create_work(function_id: str)-> None:
     msg_body = {
         'operation': 'NEW_SURVEYS',
+        'api_id': 'ODG_SURVEYS',
         'host_url': host_url,
         'resource': 'survey',
         'source': function_id,
