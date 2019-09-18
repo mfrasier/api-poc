@@ -41,35 +41,42 @@ def handler(event, context):
     process_messages(work_queue)
 
 
-def process_messages(queue: 'Queue') -> None:
-    LOG.info('getting messages from work queue {}'.format(work_queue_url))
-    messages = queue.receive_messages(
+def _receive_messages(queue: 'boto3.SQS.Queue', count: int = 10) -> list['boto3.SQS.Message']:
+    return queue.receive_messages(
         AttributeNames=['All'],
-        MaxNumberOfMessages=10,
+        MaxNumberOfMessages=count,
         VisibilityTimeout=10,
     )
+
+
+def process_messages(queue: 'boto3.SQS.Queue') -> None:
+    LOG.info('getting messages from work queue {}'.format(work_queue_url))
+    messages = _receive_messages(queue)
     LOG.info('received {} messages from work queue '.format(len(messages), queue))
 
-    for message in messages:
-        LOG.info('message id: {}'.format(message.message_id))
-        LOG.info('message body: {}'.format(message.body))
+    while len(messages) > 0:
+        for message in messages:
+            LOG.info('message id: {}'.format(message.message_id))
+            LOG.info('message body: {}'.format(message.body))
 
-        # process message
-        LOG.info('invoking lambda function {}'.format(worker_arn))
-        response = _lambda.invoke(
-            FunctionName=worker_arn,
-            InvocationType='Event',
-            Payload=message.body
-        )
-        LOG.info('lambda invocation returned {}'.format(response))
+            # process message
+            LOG.info('invoking lambda function {}'.format(worker_arn))
+            response = _lambda.invoke(
+                FunctionName=worker_arn,
+                InvocationType='Event', # async
+                Payload=message.body
+            )
+            LOG.info('lambda invocation returned {}'.format(response))
 
-        # delete() if all went well
+            message.delete() # if all went well
+
+        messages = _receive_messages(queue)
 
 
 def hydrate_state() -> dict:
     state = []
     LOG.info('rehydrating current throttle state')
-    keys = r.keys('survey:*')
+    keys = r.keys('quota:*')
 
     # could use lock or pipeline here if it becomes necessary
     for key in keys:

@@ -29,13 +29,14 @@ An SQS queue is used to queue work for the orchestrator to farm out to the worke
 
 An SQS interface endpoint is defined to allow private communication to SQS.
 
-### Lamda functions
+### Lambda functions
 
 #### Orchestrator
 The orchestrator application coordinates the workers in an attempt to manage the 
 throttling behavior.  
 
-It is triggered at an interval by a cloudwatch event, hydrates quota state from database, 
+It is triggered at an interval by a cloudwatch event and first hydrates quota 
+state from its quota database (redis). 
 
 If an API is throttled (circuit breaker open) it invokes a worker with a health check
  message to test API operation and update circuit breaker status to closed if quota
@@ -61,16 +62,18 @@ a circuit breaker state change from open to closed if quota has been lifted.
 
 #### Task Master
 This function emulates an upstream business process putting work on the work queue
-for consumption by the orchestrator.
+for consumption by the orchestrator.  It is triggered by the same cloudwatch event rule
+that triggers the orchestrator function.
  
 #### External API server emulator
 This service emulates a RESTful API server throttling API calls  
  and is the target for our workers who are performing actual business logic.
  
-The API service manages very few resources and has a couple of management endpoints.
+The API service manages very few resources.
 
 ##### Resources
-The service tracks surveys used to gather information from people.  The resource hierarchy is simple.  
+The service tracks surveys used to gather information from people.  
+The resource hierarchy is simple.  
 
 * survey: zero or more
   * interview: zero or more
@@ -96,9 +99,8 @@ Each call to a resource endpoint decrements that resource and its parent(s) in t
 When a throttle limit is reached it will respond with http status code `429` 
 and the response will indicate the resource path location where it hit the throttle limit.
 
-##### Management
-
-The `/keys` endpoint can be used to view the current contents of the quota db. 
+Other useful resources
+* `keys` returns the current contents of the quota db. 
 
 ### Redis cluster
 There is a tiny AWS Elasticache redis cluster hosted in the VPC for tracking
@@ -158,7 +160,7 @@ Starting a redis server, on MacOS using brew in this case - could run one in a d
 Create a file containing sample environment variables for use by sam cli (e.g. `env.json`)
 Use the appropriate IP address to reach your local test redis server.
 
-The topmost key(s) must match your lambda resource name from template.yaml.  
+The topmost key(s) must match your lambda resource name(s) from template.yaml.  
 The values are the environment variables required by the lambda(s) under test.
 
 ```json
@@ -169,7 +171,7 @@ The values are the environment variables required by the lambda(s) under test.
   }
 }
 ```
-Here is one way to retrieve the resource name
+Here is one way to retrieve the `externalapi` lambda resource name
 ```bash
 $ grep -B1 AWS::Lambda::Function template.yaml  | grep externalapi | cut -d':' -f1
   externalapihandler82E49736
@@ -178,38 +180,39 @@ SAM will also helpfully give you a list if you specify the incorrect name.
 
 The below commands will
 * generate a cloudformation template for local sam usage
-* generate test event data in a file (apigateway in this case) 
+* generate test event data in a file (`apigateway_event.json` in this case) 
 
 ```shell script
 cdk synth --no-staging > template.yaml
 sam local generate-event apigateway aws-proxy > apigateway_event.json
 ```
 
-Change the `path` attribute to one of the paths supported by the API server.
-
-Change the `httpMethod` to `GET` as that is the only method supported.
+In the file `apigateway_event.json`
+* Change the `path` attribute to one of the paths supported by the API server.
+* Change the `httpMethod` to `GET` as that is the only method supported.
 
 I've set mine to include multiple paths so I can quickly switch between them
 by setting the `path` key to the desired value.
 
-In this example, `/survey/1/interview/1/attachment/1` is the path that will be used by the API server. 
+In this example, `/survey/1/interview/1/attachment/1` is the path that will be 
+read by the API server lambda function (because the value of key `path` is what it reads). 
 ```
 {
   "body": "eyJ0ZXN0IjoiYm9keSJ9",
-  "path0": "/list_keys",
-  "path1": "/delete_keys",
   "path": "/survey/1/interview/1/attachment/1",
-  "path3": "/survey/1/interview/1",
-  "path4": "/survey/1",
+  "path1": "/survey/1/interview/1",
+  "path2": "/survey/1",
+  "path3": "/keys",
   "httpMethod": "GET",
 ...
 }
 ```
 
 #### Test on local stack
-Using the environment and event files as input, and lambda identifier, run lambda locally.
+Using the above environment and event files as input, and the lambda identifier, 
+run lambda locally.
 ```
-sam local invoke ExternalApiHandler7E50D66D --event ./apigateway_event.json  --env-vars env.json
+sam local invoke externalapihandler7E50D66D --event ./apigateway_event.json  --env-vars env.json
 ```
 
 You can also start up API Gateway using SAM local but that's not covered here.
@@ -217,7 +220,20 @@ You can also start up API Gateway using SAM local but that's not covered here.
 ## Stack operations with the AWS CDK
 There can be multiple stacks in a CDK app but we have only one.
 Some CDK commands require a stack name parameter but that's not required when
-there is only one stack. 
+there is only one stack.
+
+### AWS credentials and region
+I exported the environment variables `AWS_PROFILE` and `AWS_DEFAULT_REGION` to 
+determine AWS credentials and region used for all live CDK operations.
+
+e.g.
+```bash
+export AWS_PROFILE=<your_configured_profile>
+export AWS_DEFAULT_REGION=<your_favorite_region>
+``` 
+
+You can specify a role to assume from your profile but that wasn't necessary
+in my case and is not shown here.
 
 ### Bootstrap CDK resources (staging bucket, etc)
 You need to this once per account/region (i think) to set up resources for CDK itself,
@@ -303,12 +319,6 @@ as resources are created or modified.
 For production stacks it is recommended to populate the stack env with account and region
 so it is only deployed where you define.  To make this repo public, and in order
 to deploy to any account as non-production I left that information out.
-
-This project can deploy the stack based on `AWS_PROFILE` and `AWS_DEFAULT_REGION` 
-environment variables.
-
-You can specify a role to assume from your profile but that wasn't necessary
-in my case and is not shown here.
  
 ```
 cdk deploy
@@ -363,7 +373,7 @@ $ curl -XGET https://e3ryyap5mf.execute-api.us-east-1.amazonaws.com/prod/survey/
 ```
 
 ```bash
-$ curl -XGET https://e3ryyap5mf.execute-api.us-east-1.amazonaws.com/prod/list_keys
+$ curl -XGET https://e3ryyap5mf.execute-api.us-east-1.amazonaws.com/prod/keys
 
 {"keys": [{"name": "survey:interview:attachment:none", "value": "4", "ttl": 57}, {"name": "survey:interview:none", "value": "9", "ttl": 57}, {"name": "survey:none", "value": "19", "ttl": 57}]}
 ```
