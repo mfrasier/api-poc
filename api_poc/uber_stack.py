@@ -19,6 +19,12 @@ config_file_name = 'api_poc.yaml'
 
 
 def add_sns_email_subscriptions(sns_topic: core.Construct, subscriptions: dict) -> None:
+    """
+    add email subscriptions from config file to specified SNS topic
+    :param sns_topic: topic to add email subscriptions to
+    :param subscriptions: email subscriptions for this topic
+    :return:
+    """
     for subscription in subscriptions:
         email = subscription.get('email')
         if email:
@@ -255,13 +261,12 @@ class UberStack(core.Stack):
         except FileNotFoundError as e:
             print('config file not found: {}'.format(config_file_name))
 
-    def add_sns_subscriptions(self, sns_construct: 'aws_sns.Topic'):
-        """ add subscription to sns_topic """
+    def add_sns_subscriptions(self, sns_construct: sns.Topic):
+        """ add subscriptions to sns_topic """
         construct_id = sns_construct.node.id
         topic_config = \
             self.poc_config['api_poc'].get(construct_id, {}).get('subscriptions', [])
 
-        email_subscribers = \
-            [subscription for subscription in topic_config
-             if subscription.get('type') == 'email']
-        add_sns_email_subscriptions(sns_construct, email_subscribers)
+        add_sns_email_subscriptions(sns_construct, topic_config.get('email', {}))
+
+        # add lambda, etc subscribers
