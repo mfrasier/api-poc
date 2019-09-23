@@ -265,7 +265,8 @@ class UberStack(core.Stack):
         """ add subscriptions to sns_topic """
         construct_id = sns_construct.node.id
         topic_config = \
-            self.poc_config['api_poc'].get(construct_id, {}).get('subscriptions', [])
+            self.poc_config['api_poc'].get('sns', {})\
+                .get(construct_id, {}).get('subscriptions', [])
 
         add_sns_email_subscriptions(sns_construct, topic_config.get('email', {}))
 
