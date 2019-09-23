@@ -1,7 +1,14 @@
+
 cdk.out/
 .idea/
 lambda.out
 template.yaml
+cdk.context.json
+dump.rdb
+api_poc.yaml
+layers/python/
+layers/*.zip
+
 
 # Created by .ignore support plugin (hsz.mobi)
 ### Python template
@@ -130,5 +137,3 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-cdk.context.json
-dump.rdb

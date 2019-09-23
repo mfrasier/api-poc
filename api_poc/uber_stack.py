@@ -4,16 +4,49 @@ from aws_cdk import (
     aws_ec2 as ec2,
     aws_iam as iam,
     aws_sqs as sqs,
+    aws_sns as sns,
+    aws_sns_subscriptions as sns_subscriptons,
     aws_events as events,
     aws_events_targets as targets,
     aws_elasticache as elasticache,
+    aws_logs as logs,
     core
 )
 
-import sys
+import yaml
+
+config_file_name = 'api_poc.yaml'
+
+
+def add_sns_email_subscriptions(sns_topic: core.Construct, subscriptions: dict) -> None:
+    """
+    add email subscriptions from config file to specified SNS topic
+    :param sns_topic: topic to add email subscriptions to
+    :param subscriptions: email subscriptions for this topic
+    :return:
+    """
+    for subscription in subscriptions:
+        email = subscription.get('email')
+        if email:
+            format_json = subscription.get('json', False)
+
+            sns_topic.add_subscription(
+                sns_subscriptons.EmailSubscription(
+                    email_address=email,
+                    json=format_json
+                )
+            )
+            print('added sns email subscription {} to topic {}'.format(
+                email, sns_topic.node.id))
+        else:
+            print('email attribute not found in subscription {}'.format(subscription))
+            return
 
 
 class UberStack(core.Stack):
+    """
+    Define cloudformation stack to deploy infrastructure and lambdas
+    """
     @property
     def redis_address(self) -> str:
         return self._redis_cache.attr_redis_endpoint_address
@@ -24,6 +57,9 @@ class UberStack(core.Stack):
 
     def __init__(self, scope: core.Stack, id: str, **kwargs):
         super().__init__(scope, id, **kwargs)
+
+        self.poc_config = {'api_poc': dict()}
+        self.read_config()
 
         # shared stuff
         self._vpc = ec2.Vpc(
@@ -46,10 +82,12 @@ class UberStack(core.Stack):
             connection=ec2.Port.tcp_range(start_port=6379, end_port=6379)
         )
 
-        # TODO someday, create the layer from local zip file
-        self._python3_lib_layer = _lambda.LayerVersion.from_layer_version_arn(
-            self, 'python3-lib-layer',
-            layer_version_arn='arn:aws:lambda:us-east-1:011955760856:layer:python3-lib-layer:1'
+        self._python3_lib_layer = _lambda.LayerVersion(
+            self,
+            'python3-lib-layer',
+            description="python3 module dependencies",
+            compatible_runtimes=[_lambda.Runtime.PYTHON_3_7, _lambda.Runtime.PYTHON_3_6],
+            code=_lambda.Code.from_asset('layers/python3-lib-layer.zip')
         )
 
         # redis cache cluster
@@ -70,13 +108,6 @@ class UberStack(core.Stack):
         )
         self._redis_cache.add_depends_on(self._cache_subnet_group)
 
-        # stack output
-        core.CfnOutput(
-            self, 'Redis_Address',
-            value=self._redis_cache.attr_redis_endpoint_address + ':' +
-                  self._redis_cache.attr_redis_endpoint_port
-        )
-
         # external API simulator lambda
         api_handler = _lambda.Function(
             self, "external-api",
@@ -87,6 +118,7 @@ class UberStack(core.Stack):
             vpc=self._vpc,
             vpc_subnets=self._private_subnet_selection,
             security_group=self._security_group,
+            log_retention=logs.RetentionDays.FIVE_DAYS,
             tracing=_lambda.Tracing.ACTIVE
         )
         api_handler.add_environment('REDIS_ADDRESS', self.redis_address)
@@ -117,11 +149,12 @@ class UberStack(core.Stack):
         worker_dlq = sqs.Queue(
             self, 'worker-dlq')
 
-        sqs_service_endpoint = ec2.InterfaceVpcEndpoint(
-            self, 'sqs-service-endpoint',
-            vpc=self._vpc,
-            service=ec2.InterfaceVpcEndpointAwsService(name='sqs')
+        throttle_event_topic = sns.Topic(
+            self,
+            'throttle-events-topic'
         )
+
+        self.add_sns_subscriptions(throttle_event_topic)
 
         worker = _lambda.Function(
             self, 'worker',
@@ -130,15 +163,19 @@ class UberStack(core.Stack):
             handler='worker.handler',
             layers=[self._python3_lib_layer],
             reserved_concurrent_executions=20,
+            timeout=core.Duration.minutes(1),
             dead_letter_queue=worker_dlq,
             vpc=self._vpc,
             vpc_subnets=self._private_subnet_selection,
             security_group=self._security_group,
+            log_retention=logs.RetentionDays.FIVE_DAYS,
             tracing=_lambda.Tracing.ACTIVE,
         )
         worker.add_environment('JOB_QUEUE_URL', job_queue.queue_url)
+        worker.add_environment('THROTTLE_EVENTS_TOPIC', throttle_event_topic.topic_arn)
         worker.add_environment('REDIS_ADDRESS', self.redis_address)
         worker.add_environment('REDIS_PORT', self.redis_port)
+        throttle_event_topic.grant_publish(worker)
 
         orchestrator = _lambda.Function(
             self, 'orchestrator',
@@ -147,9 +184,11 @@ class UberStack(core.Stack):
             handler='orchestrator.handler',
             layers=[self._python3_lib_layer],
             reserved_concurrent_executions=1,
+            timeout=core.Duration.minutes(5),
             vpc=self._vpc,
             vpc_subnets=self._private_subnet_selection,
             security_group=self._security_group,
+            log_retention=logs.RetentionDays.FIVE_DAYS,
             tracing=_lambda.Tracing.ACTIVE,
         )
         orchestrator.add_environment('JOB_QUEUE_URL', job_queue.queue_url)
@@ -178,6 +217,7 @@ class UberStack(core.Stack):
             vpc=self._vpc,
             vpc_subnets=self._private_subnet_selection,
             security_group=self._security_group,
+            log_retention=logs.RetentionDays.FIVE_DAYS,
             tracing=_lambda.Tracing.ACTIVE,
         )
         task_master.add_environment('SQS_URL', job_queue.queue_url)
@@ -200,3 +240,34 @@ class UberStack(core.Stack):
         )
         rule.add_target(targets.LambdaFunction(orchestrator))
         rule.add_target(targets.LambdaFunction(task_master))
+
+        # stack outputs
+        core.CfnOutput(
+            self, 'Redis_Address',
+            value=self._redis_cache.attr_redis_endpoint_address + ':' +
+                  self._redis_cache.attr_redis_endpoint_port
+        )
+
+    def read_config(self) -> None:
+        """ read configuration file """
+        print('reading config from {}'.format(config_file_name))
+        try:
+            with open(config_file_name) as config_file:
+                try:
+                    self.poc_config = yaml.safe_load(config_file)
+                except yaml.YAMLError as e:
+                    print('error parsing config file: {}'.format(e))
+                    return
+        except FileNotFoundError as e:
+            print('config file not found: {}'.format(config_file_name))
+
+    def add_sns_subscriptions(self, sns_construct: sns.Topic):
+        """ add subscriptions to sns_topic """
+        construct_id = sns_construct.node.id
+        topic_config = \
+            self.poc_config['api_poc'].get('sns', {})\
+                .get(construct_id, {}).get('subscriptions', [])
+
+        add_sns_email_subscriptions(sns_construct, topic_config.get('email', {}))
+
+        # add lambda, etc subscribers

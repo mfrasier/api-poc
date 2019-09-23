@@ -1,0 +1,10 @@
+---
+api_poc:
+  vpc:
+    cidr: 10.0.0.0/24
+  sns:
+    throttle-events-topic:
+      subscriptions:
+        email:
+          - email: a.user@example.com
+            json: false

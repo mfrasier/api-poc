@@ -27,7 +27,9 @@ setuptools.setup(
         "aws_cdk.aws-elasticache",
         "cdk-watchful",
         "redis",
-        "boto3"
+        "boto3",
+        "requests",
+        "pyyaml",
     ],
 
     python_requires=">=3.6",
