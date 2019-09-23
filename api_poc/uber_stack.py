@@ -40,7 +40,6 @@ def add_sns_email_subscriptions(sns_topic: core.Construct, subscriptions: dict) 
                 email, sns_topic.node.id))
         else:
             print('email attribute not found in subscription {}'.format(subscription))
-            return
 
 
 class UberStack(core.Stack):
