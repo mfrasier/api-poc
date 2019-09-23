@@ -20,7 +20,7 @@ r = redis.Redis(
     decode_responses=True
 )
 
-host_url = os.environ['API_HOST_URL']
+api_url = os.environ['API_HOST_URL']
 sqs = boto3.resource('sqs')
 queue_url = os.environ['SQS_URL']
 LOG.info('queue_url={}'.format(queue_url))
@@ -38,15 +38,20 @@ def handler(event, context):
 
 
 def create_work(function_id: str)-> None:
-    msg_body = {
+    """
+    create and send a job descripion to work queue
+    :param function_id:
+    :return:
+    """
+    job = {
         'operation': 'NEW_SURVEYS',
         'api_id': 'ODG_SURVEYS',
-        'host_url': host_url,
+        'api_url': api_url,
         'resource': 'survey',
-        'source': function_id,
+        'source_id': function_id,
     }
 
     work_queue.send_message(
-        MessageBody=json.dumps(msg_body)
+        MessageBody=json.dumps(job)
     )
-    LOG.info('sent work message to SQS: {}'.format(msg_body))
+    LOG.info('sent work message to SQS: {}'.format(job))
