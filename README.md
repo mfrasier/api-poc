@@ -14,6 +14,8 @@ The lambda functions are in the directory `api_poc/lambda`
 The infrastructure is managed by AWS cloudformation, which the CDK integrates with.  
 This application defines all of the infrastructure, including lambda functions. 
 
+![api_poc drawing](api_poc.svg)
+
 ### VPC
 The dedicated POC environment consists of a VPC with subnets in a single availability zone.
  There are typical VPC components like NAT, internet gateway, route tables.
