@@ -20,21 +20,24 @@ else
     perform business logic
   else
     mark path as OPEN (circuit breaker)
+    
+TODO put failed work on dead letter queue
 """
 
 LOG = logging.getLogger()
 LOG.setLevel(logging.INFO)
+NOTIFY_SNS_ARN = os.environ['THROTTLE_EVENTS_TOPIC']
+REDIS_ADDRESS = os.environ['REDIS_ADDRESS']
+REDIS_PORT = os.environ['REDIS_PORT']
 
 r = redis.Redis(
-    host=os.environ['REDIS_ADDRESS'],
-    port=os.environ['REDIS_PORT'],
+    host=REDIS_ADDRESS,
+    port=REDIS_PORT,
     decode_responses=True
 )
 
-notify_sns_arn = os.environ['THROTTLE_EVENTS_TOPIC']
-
 sns = boto3.resource('sns')
-notify_topic = sns.Topic(notify_sns_arn)
+notify_topic = sns.Topic(NOTIFY_SNS_ARN)
 
 
 def handler(event, context):
@@ -43,143 +46,142 @@ def handler(event, context):
     event contains message from orchestrator
     """
     LOG.info('request: {}'.format(event))
-    perform_request(event)
+    # perform_request(event)
+    Worker(event)()
 
 
-def perform_request(event: dict) -> int:
-    """
-    coordinate http request and call specified operation
-    :param event: lambda event object
-    :return: status code of last operation
-    """
-    operation = event.get('operation')
+class Worker:
+    def __init__(self, job):
+        self.job = job
+        self.api_key = self.job.get('api_id')
+        self.operation = self.job.get('operation')
+        self.url = self.job.get('api_url')
+        self.resource = self.job.get('resource')
 
-    if operation is None:
-        LOG.warning("exception handling job, unknown key 'operation'")
-        return False
+    def __call__(self, *args, **kwargs):
+        self.perform_request()
 
-    response = perform_operation(event)
-    LOG.info('response={}'.format(response.json()))
-    status = response.status_code
-    api_key = event.get('api_id')
+    def perform_request(self) -> int:
+        """
+        coordinate http request and call specified operation
+        :param event: lambda event object
+        :return: status code of last operation
+        """
+        operation = self.job.get('operation')
 
-    if 200 <= status < 300:
-        LOG.warning('status {} returned for operation {}'.format(status, operation))
-    else:
-        # TODO requeue job
-        open_circuit_breaker(api_key)
+        if operation is None:
+            LOG.warning("exception handling job, unknown key 'operation'")
+            return False
 
-    if operation == 'NEW_SURVEYS':
-        status = update_survey(response)
-    elif operation == 'NEW_INTERVIEWS':
-        status = update_interviews(response)
-    elif operation == 'NEW_ATTACHMENTS':
-        status = update_attachments(response)
-    elif operation == 'HEALTH_CHECK':
-        status = health_check(response, api_key)
-    else:
-        LOG.warning("exception handling job, unknown operation {}".format(operation))
-        return False
+        response = self.perform_operation()
+        LOG.info('response={}'.format(response.json()))
+        status = response.status_code
 
-    return status
+        if 200 <= status < 300:
+            LOG.warning('status {} returned for operation {}'.format(status, operation))
+        else:
+            # TODO requeue job
+            self.open_circuit_breaker()
 
+        if operation == 'NEW_SURVEYS':
+            status = self.update_survey(response)
+        elif operation == 'NEW_INTERVIEWS':
+            status = self.update_interviews(response)
+        elif operation == 'NEW_ATTACHMENTS':
+            status = self.update_attachments(response)
+        elif operation == 'HEALTH_CHECK':
+            status = self.health_check(response)
+        else:
+            LOG.warning("exception handling job, unknown operation {}".format(operation))
+            return False
 
-def perform_operation(job: dict) -> dict:
-    """
-    perform http oeration request
-    :param job: operation to perform
-    :return: http response
-    """
-    operation = job.get('operation')
-    url = job['api_url'] + job['resource']
-    LOG.info("querying '{}' for operation {}".format(url, operation))
-    # TODO wrap in try block as it can fail
-    response = requests.get(url)
-    LOG.info('response: status_code={}, json={}'.format(response.status_code, response.json()))
-    return response
+        return status
 
+    def perform_operation(self) -> dict:
+        """
+        perform http oeration request
+        :param job: operation to perform
+        :return: http response
+        """
+        operation = self.job.get('operation')
+        url = self.url + self.resource
+        LOG.info("querying '{}' for operation {}".format(url, operation))
+        # TODO wrap in try block as it can fail
+        response = requests.get(url)
+        LOG.info('response: status_code={}, json={}'.format(response.status_code, response.json()))
+        return response
 
-def update_survey(response: dict) -> int:
-    """
-    update survey data
-    :param response: http response
-    :return:
-    """
-    LOG.info('updating surveys')
-    return 0
+    def update_survey(self, response: dict) -> int:
+        """
+        update survey data
+        :param response: http response
+        :return:
+        """
+        LOG.info('updating surveys')
+        return 0
 
+    def update_interviews(self, response: dict) -> int:
+        """
+        update interview data
+        :param response: http response
+        :return:
+        """
+        LOG.info('updating interviews')
+        return 0
 
-def update_interviews(response: dict) -> int:
-    """
-    update interview data
-    :param response: http response
-    :return:
-    """
-    LOG.info('updating interviews')
-    return 0
+    def update_attachments(self, response: dict) -> int:
+        """
+        update attachment data
+        :param response: http response
+        :return:
+        """
+        LOG.info('updating attachments')
+        return 0
 
+    def health_check(self, response: dict) -> int:
+        """
+        perform health check of endpoint in response to work request
+        :param response: http response
+        :return:
+        """
+        status = response.status_code
+        url = response.request.url
+        LOG.info(f"health check response: {response}")
 
-def update_attachments(response: dict) -> int:
-    """
-    update attachment data
-    :param response: http response
-    :return:
-    """
-    LOG.info('updating attachments')
-    return 0
+        if 200 <= status < 300 and url is not None:
+            self.close_circuit_breaker()
+        else:
+            LOG.info('health checker taking no action for status={}, url={}'.format(status, url))
 
+        return status
 
-def health_check(response: dict, api_key: str) -> int:
-    """
-    perform health check of endpoint in response to work request
-    :param response: http response
-    :param api_key: api_key of endpoint
-    :return:
-    """
-    status = response.status_code
-    url = response.request.url
-    LOG.info(f"health check response: {response}")
+    def close_circuit_breaker(self) -> None:
+        """
+        close circuit breaker for api_key
+        """
+        # TODO check state first
+        r.set(':'.join([self.api_key, 'state']), 'CLOSED')
+        message = 'closed circuit breaker for api_key={}'.format(self.api_key)
+        LOG.info(message)
+        self.send_notification(message)
 
-    if 200 <= status < 300 and url is not None:
-        # TODO check state first?
-        close_circuit_breaker(api_key)
-    else:
-        LOG.info('health checker taking no action for status={}, url={}'.format(status, url))
+    def open_circuit_breaker(self) -> None:
+        """
+        open circuit breaker for api_key
+        """
+        # TODO check state first
+        r.set(':'.join([self.api_key, 'state']), 'OPEN')
+        message = 'opened circuit breaker for api_key={}'.format(self.api_key)
+        LOG.info(message)
+        self.send_notification(message)
 
-    return status
-
-
-def close_circuit_breaker(api_key: str):
-    """
-    close circuit breaker for api_key
-    :param api_key: api key from event
-    :return:
-    """
-    r.set(':'.join([api_key, 'state']), 'CLOSED')
-    message = 'closed circuit breaker for api_key={}'.format(api_key)
-    LOG.info(message)
-    send_notification(message)
-
-
-def open_circuit_breaker(api_key: str):
-    """
-    open circuit breaker for api_key
-    :param api_key: api key from event
-    :return:
-    """
-    r.set(':'.join([api_key, 'state']), 'OPEN')
-    message = 'opened circuit breaker for api_key={}'.format(api_key)
-    LOG.info(message)
-    send_notification(message)
-
-
-def send_notification(message):
-    """
-    send notification
-    :param message:
-    :return:
-    """
-    LOG.info('sending notification: message={}'.format(message))
-    notify_topic.publish(
-        Message = message
-    )
+    def send_notification(self, message: str) -> None:
+        """
+        send notification
+        :param message:
+        :return:
+        """
+        LOG.info('sending notification: message={}'.format(message))
+        notify_topic.publish(
+            Message = message
+        )
