@@ -39,19 +39,62 @@ def handler(event, context):
 
 def create_work(function_id: str)-> None:
     """
-    create and send a job descripion to work queue
-    :param function_id:
-    :return:
+    create and send message(s) to work queue
+    :param function_id: id of message source - lambda arn
     """
-    job = {
+    send_survey_work_message(function_id)
+    send_interview_work_message(function_id)
+    send_attachment_work_message(function_id)
+    # send_health_check_message(function_id)
+
+
+def send_message(message: dict) -> None:
+    """ send message to queue """
+    work_queue.send_message(
+        MessageBody=json.dumps(message)
+    )
+    LOG.info('sent message to SQS: {}'.format(message))
+
+
+def send_survey_work_message(source_id: str) -> None:
+    """create and send a survey message to work queue"""
+    send_message({
         'operation': 'NEW_SURVEYS',
         'api_id': 'ODG_SURVEYS',
         'api_url': api_url,
         'resource': 'survey',
-        'source_id': function_id,
-    }
+        'source_id': source_id,
+    })
 
-    work_queue.send_message(
-        MessageBody=json.dumps(job)
-    )
-    LOG.info('sent work message to SQS: {}'.format(job))
+
+def send_interview_work_message(source_id: str) -> None:
+    """create and send a interview message to work queue"""
+    send_message({
+        'operation': 'NEW_INTERVIEWS',
+        'api_id': 'ODG_SURVEYS',
+        'api_url': api_url,
+        'resource': 'survey/1/interview',
+        'source_id': source_id,
+    })
+
+
+def send_attachment_work_message(source_id: str) -> None:
+    """create and send a attachment message to work queue"""
+    send_message({
+        'operation': 'NEW_ATTACHMENTS',
+        'api_id': 'ODG_SURVEYS',
+        'api_url': api_url,
+        'resource': 'survey/1/interview/1/attachment',
+        'source_id': source_id,
+    })
+
+
+def send_health_check_message(source_id: str) -> None:
+    """create and send a health check message to work queue"""
+    send_message({
+        'operation': 'HEALTH_CHECK',
+        'api_id': 'ODG_SURVEYS',
+        'api_url': api_url,
+        'resource': 'health',
+        'source_id': source_id,
+    })

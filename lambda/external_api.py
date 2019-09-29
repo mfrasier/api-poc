@@ -76,6 +76,17 @@ def handler(event, context):
                 },
                 'body': json.dumps(key_data)
             }
+        elif path == '/health':
+            """return status 429 if quota exceeded, 200 otherwise"""
+            exceeded, interval = quota_exceeded(api_key)
+            if exceeded:
+                message = f"quota exceeded at {interval} interval"
+            else:
+                message = "quota ok"
+            body = {
+                'status_code': 429 if exceeded else 200,
+                'message': message
+            }
         else:
             body = {
                 'status_code': 400,
@@ -177,8 +188,9 @@ def set_expiry_and_quota(key: str) -> None:
     quota = quotas[interval]
 
     # using a pipeline here to make atomic
-    pipeline = r.pipeline().set(key, quota['quota']).expire(key, quota['ttl'])
-    pipeline.execute()
+    # pipeline = r.pipeline().set(key, quota['quota']).expire(key, quota['ttl'])
+    # pipeline.execute()
+    r.set(key, quota['quota'], quota['ttl'])
     LOG.info(f"set key {key} quota={quota['quota']} and ttl={quota['ttl']}")
 
 

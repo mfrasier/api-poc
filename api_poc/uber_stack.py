@@ -1,3 +1,5 @@
+import sys
+
 from aws_cdk import (
     aws_lambda as _lambda,
     aws_apigateway as apigw,
@@ -37,9 +39,9 @@ def add_sns_email_subscriptions(sns_topic: core.Construct, subscriptions: dict) 
                 )
             )
             print('added sns email subscription {} to topic {}'.format(
-                email, sns_topic.node.id))
+                email, sns_topic.node.id), file=sys.stderr)
         else:
-            print('email attribute not found in subscription {}'.format(subscription))
+            print('email attribute not found in subscription {}'.format(subscription), file=sys.stderr)
 
 
 class UberStack(core.Stack):
@@ -170,6 +172,7 @@ class UberStack(core.Stack):
             log_retention=logs.RetentionDays.FIVE_DAYS,
             tracing=_lambda.Tracing.ACTIVE,
         )
+        worker.add_environment('API_KEY', '212221848ab214821de993a9d')
         worker.add_environment('JOB_QUEUE_URL', job_queue.queue_url)
         worker.add_environment('THROTTLE_EVENTS_TOPIC', throttle_event_topic.topic_arn)
         worker.add_environment('REDIS_ADDRESS', self.redis_address)
@@ -183,13 +186,14 @@ class UberStack(core.Stack):
             handler='orchestrator.handler',
             layers=[self._python3_lib_layer],
             reserved_concurrent_executions=1,
-            timeout=core.Duration.minutes(5),
+            timeout=core.Duration.minutes(2),
             vpc=self._vpc,
             vpc_subnets=self._private_subnet_selection,
             security_group=self._security_group,
             log_retention=logs.RetentionDays.FIVE_DAYS,
             tracing=_lambda.Tracing.ACTIVE,
         )
+        orchestrator.add_environment('API_HOST_URL', self._api_gateway.url)
         orchestrator.add_environment('JOB_QUEUE_URL', job_queue.queue_url)
         orchestrator.add_environment('JOB_DLQ_URL', job_dlq.queue_url)
         orchestrator.add_environment('REDIS_ADDRESS', self.redis_address)
@@ -230,7 +234,7 @@ class UberStack(core.Stack):
         rule = events.Rule(
             self, 'orchestrator_rule',
             schedule=events.Schedule.cron(
-                minute='0/10',
+                minute='0/15',
                 hour='*',
                 month='*',
                 week_day='*',
@@ -249,16 +253,16 @@ class UberStack(core.Stack):
 
     def read_config(self) -> None:
         """ read configuration file """
-        print('reading config from {}'.format(config_file_name))
+        print('reading config from {}'.format(config_file_name), file=sys.stderr)
         try:
             with open(config_file_name) as config_file:
                 try:
                     self.poc_config = yaml.safe_load(config_file)
                 except yaml.YAMLError as e:
-                    print('error parsing config file: {}'.format(e))
+                    print('error parsing config file: {}'.format(e), file=sys.stderr)
                     return
         except FileNotFoundError as e:
-            print('config file not found: {}'.format(config_file_name))
+            print('config file not found: {}'.format(config_file_name), file=sys.stderr)
 
     def add_sns_subscriptions(self, sns_construct: sns.Topic):
         """ add subscriptions to sns_topic """

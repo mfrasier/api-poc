@@ -43,10 +43,10 @@ state from its quota database (redis).
 
 If an API is throttled (circuit breaker open) it invokes a worker with a health check
  message to test API operation and update circuit breaker status to closed if quota
- has been lifted. 
+ has been lifted. [health message v1](#health-message-v1)
 
 If API circuit breaker is closed the function reads work messages from the work queue, 
-invoking worker functions to perform work.
+invoking worker functions to perform work. [worker message v1](#worker-message-v1)
 
 #### Worker
 The orchestrator invokes this function, sending the work instructions as payload.
@@ -59,14 +59,17 @@ If the API call is throttled, the worker toggles the circuit breaker status
 to open.  
 (not implemented as of Sep 17. SNS sounds like a good way to do this - can also
 send notifications to slack, etc).
+[worker message v1](#worker-message-v1)  
 
 * Health check messages instruct the worker to query the API quota status and effect
-a circuit breaker state change from open to closed if quota has been lifted.  
+a circuit breaker state change from open to closed if quota has been lifted.
+[health message v1](#health-message-v1)  
 
 #### Task Master
 This function emulates an upstream business process putting work on the work queue
 for consumption by the orchestrator.  It is triggered by the same cloudwatch event rule
-that triggers the orchestrator function.
+that triggers the orchestrator function. [worker message v1](#worker-message-v1)
+
  
 #### External API server emulator
 This service emulates a RESTful API server throttling API calls  
@@ -155,11 +158,13 @@ $ pip install -r requirements.txt
 See [Installing the AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html)
 
 #### Start a redis server
+
 Starting a redis server, on MacOS using brew in this case - could run one in a docker container
 
 `$ redis-server --protected-mode no`
 
 #### Test files for SAM
+
 Create a file containing sample environment variables for use by sam cli (e.g. `env.json`)
 Use the appropriate IP address to reach your local test redis server.
 
@@ -174,19 +179,25 @@ The values are the environment variables required by the lambda(s) under test.
   }
 }
 ```
-Here is one way to retrieve the `externalapi` lambda resource name
+Here is one way to retrieve the lambda resource names
 ```bash
-$ grep -B1 AWS::Lambda::Function template.yaml  | grep externalapi | cut -d':' -f1
-  externalapihandler82E49736
+$ grep -B1 AWS::Lambda::Function template.yaml | grep -v Type | grep -v '-' | cut -d':' -f1
+  externalapi1DAE34E8
+  LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aFD4BFC8A
+  worker28EA3E30
+  orchestratorDDCE86FA
+  taskmasterC345736A
 ``` 
 SAM will also helpfully give you a list if you specify the incorrect name.
 
-The below commands will
-* generate a cloudformation template for local sam usage
-* generate test event data in a file (`apigateway_event.json` in this case) 
+Generate a cloudformation template for local sam usage 
 
 ```bash
 $ cdk synth --no-staging > template.yaml
+```
+
+Generate apigateway aws proxy event data to a file (`apigateway_event.json` in this case)
+```bash
 $ sam local generate-event apigateway aws-proxy > apigateway_event.json
 ```
 
@@ -211,23 +222,53 @@ read by the API server lambda function (because the value of key `path` is what 
 }
 ```
 
+Generate cloudwatch scheduled event data.  
+Both orchestrator and task_master functions can use this event.
+```bash
+$ sam local generate-event cloudwatch scheduled-event > cloudwatch_event.json
+```
+
 #### Test on local stack
+
 Using the above environment and event files as input, and the lambda identifier, 
-run lambda locally.
+run the api handler lambda locally.  Be sure to use the handler resource name  
+from your template.yaml file.
 ```bash
 $ sam local invoke externalapihandler7E50D66D --event ./apigateway_event.json  --env-vars env.json
 ```
 
 The other lambdas can be tested locally in a similar fashion.
 
+Run the task master lambda locally.  
+TODO need to resolve this missing redis issue - it works (or worked) for api handler.
+Hmm, probably introduced with embedded layer instead of from pre-existing
+```bash
+$ sam local invoke taskmasterC345736A --event ./cloudwatch_event.json  --env-vars env.json
+...
+python3liblayerCC17FDB8 is a local Layer in the template
+...
+{
+  "errorType": "Runtime.ImportModuleError",
+  "errorMessage": "Unable to import module 'task_master': No module named 'redis'"
+}
+```
+
+Run the orchestrator lambda locally.  
+TODO same missing redis issue
+```bash
+$ sam local invoke orchestratorDDCE86FA --event ./cloudwatch_event.json  --env-vars env.json
+```
+
 You can also start up API Gateway using SAM local but that's not covered here.
 
 ## Stack operations with the AWS CDK
+
 There can be multiple stacks in a CDK app but we have only one.
 Some CDK commands require a stack name parameter but that's not required when
 there is only one stack.
 
 ### AWS credentials and region
+
 I exported the environment variables `AWS_PROFILE` and `AWS_DEFAULT_REGION` to 
 determine AWS credentials and region used for all live CDK operations.
 
@@ -241,6 +282,7 @@ You can specify a role to assume from your profile but that wasn't necessary
 in my case and is not shown here.
 
 ### Bootstrap CDK resources (staging bucket, etc)
+
 You need to this once per account/region (i think) to set up resources for CDK itself,
 such as the S3 bucket it uses for staging lambda assets, etc.
 `cdk bootstrap`
@@ -255,6 +297,7 @@ api-uberstack-dev
 The stack name(s) there will be the name of your stack when deployed to Cloudformation.
 
 ### Synthesize stack
+
 This creates your cloudformation stack template which you can inspect.
  By defaut it is written to stdout but can be redirected into a file when desired.
 
@@ -269,6 +312,7 @@ Resources:
 ```
 
 ### Stack diff
+
 This command causes an inspection of your deployed stack with the generated stack and
 generates very helpful diff output showing additions, deletions, changes, etc.  
 
@@ -317,6 +361,7 @@ Resources
 ```
 
 ### Deploy the stack
+
 This command attempts to modify your deployed stack to conform to your defined stack.
 It will show creation of a cloudformation changeset and cloudformation events
 as resources are created or modified.
@@ -334,13 +379,28 @@ api-uberstack-dev: creating CloudFormation changeset...
 ``` 
 
 ### Destroy the stack
+
 This deletes your deployed stack.
 
 `cdk destroy`
 
 ## Test deployed stack
 
+### List deployed functions
+
+Given the stack name `uberstack-dev` this command will list deployed lambdas. 
+```bash
+$ aws lambda list-functions --query 'Functions[].FunctionName' --output text \
+  | grep uberstack-dev
+    "api-uberstack-dev-worker28EA3E30-8L8N2UVED2IB",
+    "api-uberstack-dev-externalapi1DAE34E8-O9MATLUNRU72",
+    "api-uberstack-dev-orchestratorDDCE86FA-1P9X01M4C6EGV",
+    "api-uberstack-dev-taskmasterC345736A-1Q3DZQSDJT3P7",
+    "api-uberstack-dev-LogRetentionaae0aa3c5b4d4f87b02d-MR9SHTBDQJW2",
+```
+
 ### Invoke deployed API handler lambda directly
+
 This invokes the deployed lambda directly, without the API Gateway intermediary.  
 Useful for troubleshooting gateway errors - status code 502, etc - 
 to more directly view the likely lambda issue. 
@@ -350,7 +410,7 @@ Using the appropriate function name parameter for your environment: invocation w
 ```bash
 $ aws lambda invoke \
   --region us-east-1 \
-  --function-name api-poc-dev-ExternalApiHandler7E50D66D-LDEJZM1WSHCB \
+  --function-name api-uberstack-dev-externalapi1DAE34E8-O9MATLUNRU72 \
   --payload file://apigateway_event.json \
   --log Tail \
   lambda.out
@@ -361,7 +421,9 @@ Output returned from lambda is in file `lambda.out`
 
 The other lambdas can be tested in a similar fashion.
 
+
 ### External api server
+
 Call the api handler lambda via the API Gateway endpoint to emulate an external API server.
 
 The api gateway URL is a cloudformation output which CDK will print when its successful.
@@ -386,4 +448,25 @@ $ curl -XGET https://e3ryyap5mf.execute-api.us-east-1.amazonaws.com/prod/survey/
 $ curl -XGET https://e3ryyap5mf.execute-api.us-east-1.amazonaws.com/prod/keys
 
 {"keys": [{"name": "survey:interview:attachment:none", "value": "4", "ttl": 57}, {"name": "survey:interview:none", "value": "9", "ttl": 57}, {"name": "survey:none", "value": "19", "ttl": 57}]}
+```
+
+<a id="worker-message-v1"/>worker message v1 
+```json
+{
+        "operation": "NEW_SURVEYS",
+        "api_id": "ODG_SURVEYS",
+        "api_url": "https://api_url",
+        "resource": "survey",
+        "source_id": "arn:aws:account:lambda/id"
+}
+```
+<a id="health-message-v1"/>health message v1
+```json
+{
+        "operation": "HEALTH_CHECK",
+        "api_id": "ODG_SURVEYS",
+        "api_url": "https://api_url",
+        "resource": "health",
+        "source_id": "arn:aws:account:lambda/id"
+}
 ```

@@ -42,35 +42,144 @@ def handler(event, context):
     main entry point
     event contains message from orchestrator
     """
-    LOG.info('request: {}'.format(json.dumps(event)))
+    LOG.info('request: {}'.format(event))
+    perform_request(event)
 
-    try:
-        if event['operation'] == 'NEW_SURVEYS':
-            update_survey(event)
-    except KeyError as e:
+
+def perform_request(event: dict) -> int:
+    """
+    coordinate http request and call specified operation
+    :param event: lambda event object
+    :return: status code of last operation
+    """
+    operation = event.get('operation')
+
+    if operation is None:
         LOG.warning("exception handling job, unknown key 'operation'")
-        LOG.info('job: '.format(event))
+        return False
+
+    response = perform_operation(event)
+    LOG.info('response={}'.format(response.json()))
+    status = response.status_code
+    api_key = event.get('api_id')
+
+    if 200 <= status < 300:
+        LOG.warning('status {} returned for operation {}'.format(status, operation))
+    else:
+        # TODO requeue job
+        open_circuit_breaker(api_key)
+
+    if operation == 'NEW_SURVEYS':
+        status = update_survey(response)
+    elif operation == 'NEW_INTERVIEWS':
+        status = update_interviews(response)
+    elif operation == 'NEW_ATTACHMENTS':
+        status = update_attachments(response)
+    elif operation == 'HEALTH_CHECK':
+        status = health_check(response, api_key)
+    else:
+        LOG.warning("exception handling job, unknown operation {}".format(operation))
+        return False
+
+    return status
 
 
-def update_survey(job: dict) -> None:
+def perform_operation(job: dict) -> dict:
+    """
+    perform http oeration request
+    :param job: operation to perform
+    :return: http response
+    """
+    operation = job.get('operation')
     url = job['api_url'] + job['resource']
-    LOG.info("querying '{}' for new surveys".format(url))
+    LOG.info("querying '{}' for operation {}".format(url, operation))
+    # TODO wrap in try block as it can fail
     response = requests.get(url)
-    LOG.info('response: status={}, json={}'.format(response.status_code, response.json()))
+    LOG.info('response: status_code={}, json={}'.format(response.status_code, response.json()))
+    return response
 
-    if response.status_code == 429:
-        message = 'exceeded quota at {}'.format(url)
-        LOG.info(message)
-        open_circuit_breaker(url)
-        send_notification(message)
+
+def update_survey(response: dict) -> int:
+    """
+    update survey data
+    :param response: http response
+    :return:
+    """
+    LOG.info('updating surveys')
+    return 0
+
+
+def update_interviews(response: dict) -> int:
+    """
+    update interview data
+    :param response: http response
+    :return:
+    """
+    LOG.info('updating interviews')
+    return 0
+
+
+def update_attachments(response: dict) -> int:
+    """
+    update attachment data
+    :param response: http response
+    :return:
+    """
+    LOG.info('updating attachments')
+    return 0
+
+
+def health_check(response: dict, api_key: str) -> int:
+    """
+    perform health check of endpoint in response to work request
+    :param response: http response
+    :param api_key: api_key of endpoint
+    :return:
+    """
+    status = response.status_code
+    url = response.request.url
+    LOG.info(f"health check response: {response}")
+
+    if 200 <= status < 300 and url is not None:
+        # TODO check state first?
+        close_circuit_breaker(api_key)
+    else:
+        LOG.info('health checker taking no action for status={}, url={}'.format(status, url))
+
+    return status
+
+
+def close_circuit_breaker(api_key: str):
+    """
+    close circuit breaker for api_key
+    :param api_key: api key from event
+    :return:
+    """
+    r.set(':'.join([api_key, 'state']), 'CLOSED')
+    message = 'closed circuit breaker for api_key={}'.format(api_key)
+    LOG.info(message)
+    send_notification(message)
+
+
+def open_circuit_breaker(api_key: str):
+    """
+    open circuit breaker for api_key
+    :param api_key: api key from event
+    :return:
+    """
+    r.set(':'.join([api_key, 'state']), 'OPEN')
+    message = 'opened circuit breaker for api_key={}'.format(api_key)
+    LOG.info(message)
+    send_notification(message)
 
 
 def send_notification(message):
+    """
+    send notification
+    :param message:
+    :return:
+    """
     LOG.info('sending notification: message={}'.format(message))
     notify_topic.publish(
         Message = message
     )
-
-
-def open_circuit_breaker(url: str):
-    LOG.info('opening circuit breaker for url={}'.format(url))
