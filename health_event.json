@@ -1,0 +1,7 @@
+{
+  "operation": "HEALTH_CHECK",
+  "api_id": "ODG_SURVEYS",
+  "api_url": "https://3tkhlk83c4.execute-api.us-east-1.amazonaws.com/prod/",
+  "resource": "health",
+  "source_id": "source_id"
+}
