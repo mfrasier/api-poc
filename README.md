@@ -110,10 +110,14 @@ Other useful resources
 
 ### Redis cluster
 There is a tiny AWS Elasticache redis cluster hosted in the VPC for tracking
- throttle parameters, counts, etc.  The lambda functions are attached to the VPC
+ throttle parameters, counts, etc.  The api handler lambda functions are attached to the VPC
  in order to communicate with the redis cluster. 
+ 
+The redis database is also used to store circuit breaker state.  
+The two databases belong to separate services but for this POC we are sharing
+the redis cluster for convenience.  
 
-## Local development and testing 
+## Local development and testing
 We can test locally using the 
 [sam cli](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/what-is-sam.html)
 
