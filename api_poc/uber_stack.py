@@ -202,14 +202,7 @@ class UberStack(core.Stack):
         orchestrator.add_environment('WORKER_FUNCTION_ARN', worker.function_arn)
         job_queue.grant_consume_messages(orchestrator)
         job_dlq.grant_send_messages(orchestrator)
-
-        orchestrator.add_permission(
-            id='invoke-worker',
-            principal=iam.ServicePrincipal(
-                service='lambda.amazonaws.com'
-            ),
-            source_arn=worker.function_arn,
-        )
+        worker.grant_invoke(orchestrator)
 
         task_master = _lambda.Function(
             self, 'task_master',
