@@ -21,12 +21,13 @@ else
   else
     mark path as OPEN (circuit breaker)
     
-TODO put failed work on dead letter queue
+TODO add api_key to redis circuit breaker key construct
 """
 
 LOG = logging.getLogger()
 LOG.setLevel(logging.INFO)
 NOTIFY_SNS_ARN = os.environ['THROTTLE_EVENTS_TOPIC']
+JOB_QUEUE_URL = os.environ['JOB_QUEUE_URL']
 REDIS_ADDRESS = os.environ['REDIS_ADDRESS']
 REDIS_PORT = os.environ['REDIS_PORT']
 
@@ -46,14 +47,15 @@ def handler(event, context):
     event contains message from orchestrator
     """
     LOG.info('request: {}'.format(event))
-    # perform_request(event)
     Worker(event)()
 
 
 class Worker:
     def __init__(self, job):
+        self.CLOSED_STATE = 'CLOSED'
+        self.OPEN_STATE = 'OPEN'
         self.job = job
-        self.api_key = self.job.get('api_id')
+        self.api_id = self.job.get('api_id')
         self.operation = self.job.get('operation')
         self.url = self.job.get('api_url')
         self.resource = self.job.get('resource')
@@ -61,7 +63,7 @@ class Worker:
     def __call__(self, *args, **kwargs):
         self.perform_request()
 
-    def perform_request(self) -> int:
+    def perform_request(self) -> None:
         """
         coordinate http request and call specified operation
         :param event: lambda event object
@@ -77,11 +79,13 @@ class Worker:
         LOG.info('response={}'.format(response.json()))
         status = response.status_code
 
-        if 200 <= status < 300:
+        if status >= 400:
             LOG.warning('status {} returned for operation {}'.format(status, operation))
-        else:
             # TODO requeue job
+            # can either let it go to DLQ or put back on job queue
+            # we'll put it on DLQ for now, after lambda's default retry behavior, in case it's a poison message
             self.open_circuit_breaker()
+            raise Exception('status {} returned for operation {}'.format(status, operation))
 
         if operation == 'NEW_SURVEYS':
             status = self.update_survey(response)
@@ -93,9 +97,6 @@ class Worker:
             status = self.health_check(response)
         else:
             LOG.warning("exception handling job, unknown operation {}".format(operation))
-            return False
-
-        return status
 
     def perform_operation(self) -> dict:
         """
@@ -159,21 +160,33 @@ class Worker:
         """
         close circuit breaker for api_key
         """
-        # TODO check state first
-        r.set(':'.join([self.api_key, 'state']), 'CLOSED')
-        message = 'closed circuit breaker for api_key={}'.format(self.api_key)
-        LOG.info(message)
-        self.send_notification(message)
+        key = ':'.join([self.api_id, 'state'])  # TODO make a class var - in conjunction with adding api_key
+        key_state = r.get(key)
+        LOG.info(f"circuit breaker state for key '{key}' is '{key_state}'")
+
+        if key_state != self.CLOSED_STATE:
+            r.set(key, 'CLOSED')
+            message = 'closed circuit breaker for api_key={}'.format(self.api_id)
+            LOG.info(message)
+            self.send_notification(message)
+        else:
+            LOG.info(f'api_key {self.api_id} is already closed - no action taken')
 
     def open_circuit_breaker(self) -> None:
         """
         open circuit breaker for api_key
         """
-        # TODO check state first
-        r.set(':'.join([self.api_key, 'state']), 'OPEN')
-        message = 'opened circuit breaker for api_key={}'.format(self.api_key)
-        LOG.info(message)
-        self.send_notification(message)
+        key = ':'.join([self.api_id, 'state'])
+        key_state = r.get(key)
+        LOG.info(f"circuit breaker state for key '{key}' is '{key_state}'")
+
+        if key_state != self.OPEN_STATE:
+            r.set(key, 'OPEN')
+            message = 'opened circuit breaker for api_key={}'.format(self.api_id)
+            LOG.info(message)
+            self.send_notification(message)
+        else:
+            LOG.info(f'api_key {self.api_id} is already open - no action taken')
 
     def send_notification(self, message: str) -> None:
         """

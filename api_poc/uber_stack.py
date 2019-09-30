@@ -177,6 +177,7 @@ class UberStack(core.Stack):
         worker.add_environment('THROTTLE_EVENTS_TOPIC', throttle_event_topic.topic_arn)
         worker.add_environment('REDIS_ADDRESS', self.redis_address)
         worker.add_environment('REDIS_PORT', self.redis_port)
+        worker_dlq.grant_send_messages(worker)
         throttle_event_topic.grant_publish(worker)
 
         orchestrator = _lambda.Function(
