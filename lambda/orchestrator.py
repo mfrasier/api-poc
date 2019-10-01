@@ -1,17 +1,18 @@
 import json
 import os
 from time import sleep
+from datetime import date
 import logging
 
 import boto3
 import redis
 
 """
-job orchestrator
+job orchestrator for api ODG_SURVEYS
 invoked on schedule by cloudwatch event
 read messages from job_queue, invoke task worker lambdas
-TODO: manage API state - set state for any api_id encountered and not in hydrated state.
-TODO: check state periodically in case workers have updated it, (update?)
+
+TODO: manage API stats
 """
 
 LOG = logging.getLogger()
@@ -37,6 +38,7 @@ _lambda = boto3.client('lambda')
 worker_arn = os.environ['WORKER_FUNCTION_ARN']
 
 api_id = 'ODG_SURVEYS'
+stats_hash = 'stats:invoke'
 state = {}
 batch_num = 0
 
@@ -54,10 +56,10 @@ def handler(event, context):
         api_state = state.get(f'{api_id}:state', 'CLOSED')
 
         if api_state == 'OPEN':
-            LOG.info(f'api state is {api_state}, invoking health check')
+            LOG.info(f'api state for id {api_id} is {api_state}, invoking health check')
             health_check()
         else:
-            LOG.info(f'api state is {api_state}, invoking message processor')
+            LOG.info(f'api state for id {api_id} is {api_state}, invoking message processor')
             if process_messages(work_queue) == 0:
                 LOG.info('cleared work queue - finished run.')
                 return
@@ -68,6 +70,12 @@ def handler(event, context):
 
 
 def _receive_messages(queue: 'boto3.SQS.Queue', count: int = 10) -> list:
+    """
+    receive messages from queue
+    :param queue: queue to receive messages from
+    :param count: max number of msgs to receive
+    :return: list of Message
+    """
     return queue.receive_messages(
         AttributeNames=['All'],
         MaxNumberOfMessages=count,
@@ -75,11 +83,25 @@ def _receive_messages(queue: 'boto3.SQS.Queue', count: int = 10) -> list:
     )
 
 
+def job_attribute(message: 'Message', attribute_name: str) -> 'Any':
+    """
+    inspect message body for requested attribute
+    :param message: Message to inspect
+    :param attribute_name: requested attribute name
+    :return: attribute value or None
+    """
+    return message.body.get(attribute_name)
+
+
 def process_messages(queue: 'boto3.SQS.Queue') -> int:
+    """
+    Process messages from queue by invoking worker function for each message.
+    :param queue: queue to receive messages from
+    :return: count of messages processed
+    """
+    messages_processed = 0
     LOG.info('getting messages from work queue {}'.format(WORK_QUEUE_URL))
 
-    # TODO check local copy of endpoint state to see whether to send health_check or get messages from queue
-    #
     messages = _receive_messages(queue)
     LOG.info('received {} messages from work queue '.format(len(messages), queue))
 
@@ -97,10 +119,16 @@ def process_messages(queue: 'boto3.SQS.Queue') -> int:
             Payload=message.body
         )
 
-        # TODO populate message tracker
+        # populate stats tracker
+        stats_key = ':'.join([date.strftime(date.today(), "%Y-%m-%d"), api_id])
+        print(f'incrementing stats counter for key {stats_key}')
+        r.hincrby('stats:invoke', stats_key)
 
         LOG.info('lambda invocation returned {}'.format(response))
         message.delete() # if all went well
+        messages_processed = messages_processed + 1
+
+    return messages_processed
 
 
 def health_check():

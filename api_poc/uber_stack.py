@@ -14,6 +14,9 @@ from aws_cdk import (
     aws_logs as logs,
     core
 )
+import boto3
+
+# TODO use NAT instance instead of service to save money on single-AZ POC
 
 import yaml
 
@@ -42,6 +45,28 @@ def add_sns_email_subscriptions(sns_topic: core.Construct, subscriptions: dict) 
                 email, sns_topic.node.id), file=sys.stderr)
         else:
             print('email attribute not found in subscription {}'.format(subscription), file=sys.stderr)
+
+
+def nat_ami():
+    """retrieve most recent nat ami"""
+    ec2 = boto3.client('ec2')
+    response = ec2.describe_images(
+        Filters=[
+            {
+                'Name': 'owner-alias',
+                'Values': [
+                    'amazon'
+                ]
+            },
+            {
+                'Name': 'name',
+                'Values': [
+                    'amzn-ami-vpc-nat*'
+                ]
+            }
+        ]
+    )
+    return sorted(response['Images'], key=lambda image: image['CreationDate'], reverse=True)[0]['ImageId']
 
 
 class UberStack(core.Stack):
@@ -147,9 +172,6 @@ class UberStack(core.Stack):
             )
         )
 
-        worker_dlq = sqs.Queue(
-            self, 'worker-dlq')
-
         throttle_event_topic = sns.Topic(
             self,
             'throttle-events-topic'
@@ -165,19 +187,19 @@ class UberStack(core.Stack):
             layers=[self._python3_lib_layer],
             reserved_concurrent_executions=20,
             timeout=core.Duration.minutes(1),
-            dead_letter_queue=worker_dlq,
             vpc=self._vpc,
             vpc_subnets=self._private_subnet_selection,
             security_group=self._security_group,
             log_retention=logs.RetentionDays.FIVE_DAYS,
             tracing=_lambda.Tracing.ACTIVE,
+            dead_letter_queue_enabled=False
         )
         worker.add_environment('API_KEY', '212221848ab214821de993a9d')
         worker.add_environment('JOB_QUEUE_URL', job_queue.queue_url)
         worker.add_environment('THROTTLE_EVENTS_TOPIC', throttle_event_topic.topic_arn)
         worker.add_environment('REDIS_ADDRESS', self.redis_address)
         worker.add_environment('REDIS_PORT', self.redis_port)
-        worker_dlq.grant_send_messages(worker)
+        job_queue.grant_send_messages(worker)
         throttle_event_topic.grant_publish(worker)
 
         orchestrator = _lambda.Function(

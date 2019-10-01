@@ -14,11 +14,12 @@ LOG.setLevel(logging.INFO)
 Response = namedtuple('Response', ['status_code', 'data', 'quota_exceeded', 'message'])
 
 # quota threshold counts - ttl in seconds
+requests_per_second = 2
 quotas = dict(
-    second={'ttl': 1, 'quota': 2},
-    minute={'ttl': 60, 'quota': 60 * 2},
-    hour={'ttl': 60 * 60, 'quota': 60 * 60 * 2},
-    day={'ttl': 60 * 60 * 24, 'quota': 60 * 60 * 24 * 2}
+    second={'ttl': 1, 'quota': requests_per_second},
+    minute={'ttl': 60, 'quota': 60 * requests_per_second},
+    hour={'ttl': 60 * 60, 'quota': 60 * 60 * requests_per_second},
+    day={'ttl': 60 * 60 * 24, 'quota': 60 * 60 * 24 * requests_per_second}
 )
 
 # match incoming path to ascertain resource
@@ -75,6 +76,16 @@ def handler(event, context):
                     'Content-Type': 'application/json'
                 },
                 'body': json.dumps(key_data)
+            }
+        elif path == '/stats/invoke':
+            # convenience function to get orchestrator invoke stats
+            stats = r.hgetall('stats:invoke')
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json'
+                },
+                'body': json.dumps(stats)
             }
         elif path == '/health':
             """return status 429 if quota exceeded, 200 otherwise"""

@@ -39,6 +39,8 @@ r = redis.Redis(
 
 sns = boto3.resource('sns')
 notify_topic = sns.Topic(NOTIFY_SNS_ARN)
+sqs = boto3.resource('sqs')
+job_queue = sqs.Queue(JOB_QUEUE_URL)
 
 
 def handler(event, context):
@@ -51,10 +53,10 @@ def handler(event, context):
 
 
 class Worker:
-    def __init__(self, job):
+    def __init__(self, event):
         self.CLOSED_STATE = 'CLOSED'
         self.OPEN_STATE = 'OPEN'
-        self.job = job
+        self.job = event
         self.api_id = self.job.get('api_id')
         self.operation = self.job.get('operation')
         self.url = self.job.get('api_url')
@@ -62,6 +64,26 @@ class Worker:
 
     def __call__(self, *args, **kwargs):
         self.perform_request()
+
+    def requeue_job(self, status:str) -> None:
+        """
+        requeue message to job queue for reprocessing
+        :param status: http status code from failed call
+        """
+        job_queue.send_message(
+            MessageBody=json.dumps(self.job),
+            MessageAttributes={
+                'requeued': {
+                    'DataType': 'String',
+                    'StringValue': 'true'
+                },
+                'status_code': {
+                    'DataType': 'String',
+                    'StringValue': str(status),
+                },
+            }
+        )
+        LOG.info(f'requeued message to job queue for reprocessing')
 
     def perform_request(self) -> None:
         """
@@ -82,10 +104,9 @@ class Worker:
         if status >= 400:
             LOG.warning('status {} returned for operation {}'.format(status, operation))
             # TODO requeue job
-            # can either let it go to DLQ or put back on job queue
-            # we'll put it on DLQ for now, after lambda's default retry behavior, in case it's a poison message
+            # put message back on job queue
             self.open_circuit_breaker()
-            raise Exception('status {} returned for operation {}'.format(status, operation))
+            self.requeue_job(status)
 
         if operation == 'NEW_SURVEYS':
             status = self.update_survey(response)
@@ -196,5 +217,5 @@ class Worker:
         """
         LOG.info('sending notification: message={}'.format(message))
         notify_topic.publish(
-            Message = message
+            Message=message
         )
