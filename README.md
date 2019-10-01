@@ -34,6 +34,11 @@ SNS topics and subscriptions are used to publish and consume events of interest.
 
 ### Lambda functions
 
+#### Task Master
+This function emulates an upstream business process putting work on the work queue
+for consumption by the orchestrator.  It is triggered by the same cloudwatch event rule
+that triggers the orchestrator function. [worker message v1](#worker-message-v1)
+
 #### Orchestrator
 The orchestrator application coordinates the workers in an attempt to manage the 
 throttling behavior.  
@@ -53,23 +58,23 @@ The orchestrator invokes this function, sending the work instructions as payload
 
 There are two types of messages
 
-* Work instructions instruct the function to consume data from the 
-external API and perform some work. 
-If the API call is throttled, the worker toggles the circuit breaker status 
-to open.  
-(not implemented as of Sep 17. SNS sounds like a good way to do this - can also
-send notifications to slack, etc).
+* Work instruction
+> Instructs the function to consume data from the 
+external API and perform some work.   
+
+> If the API call is throttled (status code = 429), the worker toggles the circuit breaker status 
+to open and sends a notification via an SNS topic.
+The message is requeued to the job queue for reprocessing. 
+
 [worker message v1](#worker-message-v1)  
 
-* Health check messages instruct the worker to query the API quota status and effect
-a circuit breaker state change from open to closed if quota has been lifted.
+* Health check message 
+> Instructs the worker to query the API quota status and effect
+a circuit breaker state change from open to closed if the quota has been lifted.  
+
+> A notification is sent to an SNS topic if the circuit breaker state is toggled.
+
 [health message v1](#health-message-v1)  
-
-#### Task Master
-This function emulates an upstream business process putting work on the work queue
-for consumption by the orchestrator.  It is triggered by the same cloudwatch event rule
-that triggers the orchestrator function. [worker message v1](#worker-message-v1)
-
  
 #### External API server emulator
 This service emulates a RESTful API server throttling API calls  

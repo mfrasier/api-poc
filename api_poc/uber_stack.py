@@ -172,9 +172,6 @@ class UberStack(core.Stack):
             )
         )
 
-        worker_dlq = sqs.Queue(
-            self, 'worker-dlq')
-
         throttle_event_topic = sns.Topic(
             self,
             'throttle-events-topic'
@@ -190,19 +187,19 @@ class UberStack(core.Stack):
             layers=[self._python3_lib_layer],
             reserved_concurrent_executions=20,
             timeout=core.Duration.minutes(1),
-            dead_letter_queue=worker_dlq,
             vpc=self._vpc,
             vpc_subnets=self._private_subnet_selection,
             security_group=self._security_group,
             log_retention=logs.RetentionDays.FIVE_DAYS,
             tracing=_lambda.Tracing.ACTIVE,
+            dead_letter_queue_enabled=False
         )
         worker.add_environment('API_KEY', '212221848ab214821de993a9d')
         worker.add_environment('JOB_QUEUE_URL', job_queue.queue_url)
         worker.add_environment('THROTTLE_EVENTS_TOPIC', throttle_event_topic.topic_arn)
         worker.add_environment('REDIS_ADDRESS', self.redis_address)
         worker.add_environment('REDIS_PORT', self.redis_port)
-        worker_dlq.grant_send_messages(worker)
+        job_queue.grant_send_messages(worker)
         throttle_event_topic.grant_publish(worker)
 
         orchestrator = _lambda.Function(
