@@ -76,6 +76,16 @@ def handler(event, context):
                 },
                 'body': json.dumps(key_data)
             }
+        elif path == '/stats/invoke':
+            # convenience function to get orchestrator invoke stats
+            stats = r.hgetall('stats:invoke')
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json'
+                },
+                'body': json.dumps(stats)
+            }
         elif path == '/health':
             """return status 429 if quota exceeded, 200 otherwise"""
             exceeded, interval = quota_exceeded(api_key)

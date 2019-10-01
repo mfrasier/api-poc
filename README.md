@@ -107,6 +107,7 @@ and the response will indicate the resource path location where it hit the throt
 
 Other useful resources
 * `keys` returns the current contents of the quota db. 
+* `stats/invoke` returns the count of the orchestrator invoking workers per day per api id.
 
 ### Redis cluster
 There is a tiny AWS Elasticache redis cluster hosted in the VPC for tracking
@@ -438,7 +439,7 @@ $ aws cloudformation describe-stacks --stack-name api-uberstack-dev \
 ```
 or using the console. 
 
-See above for valid resource or admin paths to append.
+See above for valid resources.
 
 A couple of examples:
 

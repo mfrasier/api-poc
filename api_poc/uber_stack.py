@@ -14,6 +14,9 @@ from aws_cdk import (
     aws_logs as logs,
     core
 )
+import boto3
+
+# TODO use NAT instance instead of service to save money on single-AZ POC
 
 import yaml
 
@@ -42,6 +45,28 @@ def add_sns_email_subscriptions(sns_topic: core.Construct, subscriptions: dict) 
                 email, sns_topic.node.id), file=sys.stderr)
         else:
             print('email attribute not found in subscription {}'.format(subscription), file=sys.stderr)
+
+
+def nat_ami():
+    """retrieve most recent nat ami"""
+    ec2 = boto3.client('ec2')
+    response = ec2.describe_images(
+        Filters=[
+            {
+                'Name': 'owner-alias',
+                'Values': [
+                    'amazon'
+                ]
+            },
+            {
+                'Name': 'name',
+                'Values': [
+                    'amzn-ami-vpc-nat*'
+                ]
+            }
+        ]
+    )
+    return sorted(response['Images'], key=lambda image: image['CreationDate'], reverse=True)[0]['ImageId']
 
 
 class UberStack(core.Stack):
