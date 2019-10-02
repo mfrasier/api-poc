@@ -45,7 +45,9 @@ def create_work(function_id: str)-> None:
     send_survey_work_message(function_id)
     send_interview_work_message(function_id)
     send_attachment_work_message(function_id)
-    # send_health_check_message(function_id)
+    send_survey_work_message(function_id)
+    send_interview_work_message(function_id)
+    send_attachment_work_message(function_id)
 
 
 def send_message(message: dict) -> None:

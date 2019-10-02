@@ -24,7 +24,7 @@ r = redis.Redis(
     decode_responses=True
 )
 
-SLEEP_SECONDS = 5
+SLEEP_SECONDS = 2
 MY_FUNCTION_NAME = None
 API_URL = os.environ['API_HOST_URL']
 WORK_QUEUE_URL = os.environ['JOB_QUEUE_URL']
