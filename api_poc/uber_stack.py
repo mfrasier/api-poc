@@ -2,16 +2,18 @@ import sys
 
 from aws_cdk import (
     aws_lambda as _lambda,
+    aws_lambda_event_sources as event_sources,
     aws_apigateway as apigw,
     aws_ec2 as ec2,
-    aws_iam as iam,
     aws_sqs as sqs,
     aws_sns as sns,
-    aws_sns_subscriptions as sns_subscriptons,
+    aws_iam as iam,
+    aws_sns_subscriptions as sns_subscriptions,
     aws_events as events,
     aws_events_targets as targets,
     aws_elasticache as elasticache,
     aws_logs as logs,
+    aws_ssm as ssm,
     core
 )
 import boto3
@@ -36,7 +38,7 @@ def add_sns_email_subscriptions(sns_topic: core.Construct, subscriptions: dict) 
             format_json = subscription.get('json', False)
 
             sns_topic.add_subscription(
-                sns_subscriptons.EmailSubscription(
+                sns_subscriptions.EmailSubscription(
                     email_address=email,
                     json=format_json
                 )
@@ -219,11 +221,13 @@ class UberStack(core.Stack):
         orchestrator.add_environment('API_HOST_URL', self._api_gateway.url)
         orchestrator.add_environment('JOB_QUEUE_URL', job_queue.queue_url)
         orchestrator.add_environment('JOB_DLQ_URL', job_dlq.queue_url)
+        orchestrator.add_environment('THROTTLE_EVENTS_TOPIC', throttle_event_topic.topic_arn)
         orchestrator.add_environment('REDIS_ADDRESS', self.redis_address)
         orchestrator.add_environment('REDIS_PORT', self.redis_port)
         orchestrator.add_environment('WORKER_FUNCTION_ARN', worker.function_arn)
         job_queue.grant_consume_messages(orchestrator)
         job_dlq.grant_send_messages(orchestrator)
+        throttle_event_topic.grant_publish(orchestrator)
         worker.grant_invoke(orchestrator)
 
         task_master = _lambda.Function(
@@ -245,7 +249,32 @@ class UberStack(core.Stack):
         task_master.add_environment('API_HOST_URL', self._api_gateway.url)
         job_queue.grant_send_messages(task_master)
 
-        # kick off lambda once per interval
+        slack_notify = _lambda.Function(
+            self,
+            'slack-notify',
+            runtime=_lambda.Runtime.PYTHON_3_7,
+            code=_lambda.Code.from_asset('lambda'),
+            handler='slack_notify.lambda_handler',
+            # vpc=self._vpc,
+            # vpc_subnets=self._private_subnet_selection,
+            # security_group=self._security_group,
+            log_retention=logs.RetentionDays.FIVE_DAYS,
+            tracing=_lambda.Tracing.ACTIVE,
+        )
+        # lambda uses ssm parameter store to retrieve values
+        slack_notify.add_environment('encryptedHookUrlKey', '/api_poc/notify/slack/hook_url')
+        slack_notify.add_environment('slackChannelKey', '/api_poc/notify/slack/channel')
+        slack_notify.add_event_source(event_sources.SnsEventSource(throttle_event_topic))
+        slack_notify.add_to_role_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                # actions=['ssm:GetParameter', 'ssm:GetParametersByPath'],
+                actions=['ssm:*'],
+                resources=['arn:aws:ssm:::parameter/api_poc/notify/slack/*'],
+            )
+        )
+
+        # kick off lambda(s) once per interval
         # See https://docs.aws.amazon.com/lambda/latest/dg/tutorial-scheduled-events-schedule-expressions.html
         rule = events.Rule(
             self, 'orchestrator_rule',

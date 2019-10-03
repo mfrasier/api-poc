@@ -14,7 +14,7 @@ The lambda functions are in the directory `api_poc/lambda`
 The infrastructure is managed by AWS cloudformation, which the CDK integrates with.  
 This application defines all of the infrastructure, including lambda functions. 
 
-![api_poc drawing](api_poc.svg)
+![api_poc drawing](api_poc.png)
 
 ### VPC
 The dedicated POC environment consists of a VPC with subnets in a single availability zone.
@@ -238,13 +238,18 @@ Both orchestrator and task_master functions can use this event.
 $ sam local generate-event cloudwatch scheduled-event > cloudwatch_event.json
 ```
 
+Genrate SNS notification event for slack_notify lambda.
+```bash
+$ sam local generate-event sns notification > sns_event.json
+```
+
 #### Test on local stack
 
 Using the above environment and event files as input, and the lambda identifier, 
 run the api handler lambda locally.  Be sure to use the handler resource name  
 from your template.yaml file.
 ```bash
-$ sam local invoke externalapihandler7E50D66D --event ./apigateway_event.json  --env-vars env.json
+$
 ```
 
 The other lambdas can be tested locally in a similar fashion.
