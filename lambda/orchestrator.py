@@ -2,6 +2,7 @@ import json
 import os
 from time import sleep
 from datetime import date
+from time import gmtime, strftime
 import logging
 
 import boto3
@@ -18,18 +19,21 @@ TODO: manage API stats
 LOG = logging.getLogger()
 LOG.setLevel(logging.INFO)
 
+NOTIFY_SNS_ARN = os.environ['THROTTLE_EVENTS_TOPIC']
+SLEEP_SECONDS = 1
+MY_FUNCTION_NAME = None
+API_URL = os.environ['API_HOST_URL']
+WORK_QUEUE_URL = os.environ['JOB_QUEUE_URL']
+WORK_DLQ_URL = os.environ['JOB_DLQ_URL']
+
 r = redis.Redis(
     host=os.environ['REDIS_ADDRESS'],
     port=os.environ['REDIS_PORT'],
     decode_responses=True
 )
 
-SLEEP_SECONDS = 2
-MY_FUNCTION_NAME = None
-API_URL = os.environ['API_HOST_URL']
-WORK_QUEUE_URL = os.environ['JOB_QUEUE_URL']
-WORK_DLQ_URL = os.environ['JOB_DLQ_URL']
-
+sns = boto3.resource('sns')
+notify_topic = sns.Topic(NOTIFY_SNS_ARN)
 sqs = boto3.resource('sqs')
 work_queue = sqs.Queue(WORK_QUEUE_URL)
 work_dlq = sqs.Queue(WORK_DLQ_URL)
@@ -51,6 +55,14 @@ def handler(event, context):
     global MY_FUNCTION_NAME, batch_num
     LOG.info('starting orchestrator...')
     MY_FUNCTION_NAME = context.function_name
+    total_messages = 0
+    total_requeued = 0
+
+    time_str = strftime("%a, %d %b %Y %H:%M:%S +0000", gmtime())
+    notify_topic.publish(
+        Message=f"{time_str}: orchestrator started",
+    )
+
     while True:
         hydrate_state()
         api_state = state.get(f'{api_id}:state', 'CLOSED')
@@ -60,11 +72,21 @@ def handler(event, context):
             health_check()
         else:
             LOG.info(f'api state for id {api_id} is {api_state}, invoking message processor')
-            if process_messages(work_queue) == 0:
-                LOG.info('cleared work queue - finished run.')
+
+            messages_processed, requeued_messages = process_messages(work_queue)
+            total_messages = total_messages + messages_processed
+            total_requeued = total_requeued + requeued_messages
+
+            if messages_processed == 0:
+                LOG.info(f'cleared work queue - finished run.  Processed {total_messages} messages, '
+                         f'of which {total_requeued} had been requeued')
+                time_str = strftime("%a, %d %b %Y %H:%M:%S +0000", gmtime())
+                notify_topic.publish(
+                    Message=f"{time_str}: orchestrator exiting.\nProcessed {total_messages} messages; "
+                    f"{total_requeued} had been requeued.",
+                )
                 return
             else:
-                # TODO use message tracker to update data store
                 batch_num = batch_num + 1
                 LOG.info(f'completed batch {batch_num} of work messages')
 
@@ -78,6 +100,7 @@ def _receive_messages(queue: 'boto3.SQS.Queue', count: int = 10) -> list:
     """
     return queue.receive_messages(
         AttributeNames=['All'],
+        MessageAttributeNames=['All'],
         MaxNumberOfMessages=count,
         VisibilityTimeout=10,
     )
@@ -100,16 +123,21 @@ def process_messages(queue: 'boto3.SQS.Queue') -> int:
     :return: count of messages processed
     """
     messages_processed = 0
+    requeued_messages = 0
     LOG.info('getting messages from work queue {}'.format(WORK_QUEUE_URL))
 
     messages = _receive_messages(queue)
     LOG.info('received {} messages from work queue '.format(len(messages), queue))
 
     if len(messages) == 0:
-        return 0
+        return messages_processed, requeued_messages
 
     for message in messages:
         LOG.info('message id: {}'.format(message.message_id))
+        LOG.info(f"message: {message}")
+        if message.message_attributes is not None:
+            if 'requeued' in message.message_attributes:
+                requeued_messages = requeued_messages + 1
 
         # process message
         LOG.info('invoking lambda function {} with message: {}'.format(worker_arn, message.body))
@@ -128,7 +156,7 @@ def process_messages(queue: 'boto3.SQS.Queue') -> int:
         message.delete() # if all went well
         messages_processed = messages_processed + 1
 
-    return messages_processed
+    return messages_processed,requeued_messages
 
 
 def health_check():

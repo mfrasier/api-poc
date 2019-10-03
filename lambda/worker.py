@@ -1,6 +1,7 @@
 import json
 import os
 import logging
+from time import gmtime, strftime
 
 import boto3
 import redis
@@ -26,6 +27,7 @@ TODO add api_key to redis circuit breaker key construct
 
 LOG = logging.getLogger()
 LOG.setLevel(logging.INFO)
+
 NOTIFY_SNS_ARN = os.environ['THROTTLE_EVENTS_TOPIC']
 JOB_QUEUE_URL = os.environ['JOB_QUEUE_URL']
 REDIS_ADDRESS = os.environ['REDIS_ADDRESS']
@@ -83,7 +85,9 @@ class Worker:
                 },
             }
         )
-        LOG.info(f'requeued message to job queue for reprocessing')
+        message = f'worker queued message to job queue for reprocessing; status code was {status}'
+        LOG.info(message)
+        self.send_notification(message)
 
     def perform_request(self) -> None:
         """
@@ -187,7 +191,7 @@ class Worker:
 
         if key_state != self.CLOSED_STATE:
             r.set(key, 'CLOSED')
-            message = 'closed circuit breaker for api_key={}'.format(self.api_id)
+            message = 'worker closed circuit breaker for api_key={}'.format(self.api_id)
             LOG.info(message)
             self.send_notification(message)
         else:
@@ -203,7 +207,7 @@ class Worker:
 
         if key_state != self.OPEN_STATE:
             r.set(key, 'OPEN')
-            message = 'opened circuit breaker for api_key={}'.format(self.api_id)
+            message = 'worker opened circuit breaker for api_key={}'.format(self.api_id)
             LOG.info(message)
             self.send_notification(message)
         else:
@@ -216,6 +220,7 @@ class Worker:
         :return:
         """
         LOG.info('sending notification: message={}'.format(message))
+        time_str = strftime("%a, %d %b %Y %H:%M:%S +0000", gmtime())
         notify_topic.publish(
-            Message=message
+            Message=f"{time_str}: {message}"
         )
