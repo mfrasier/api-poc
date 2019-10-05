@@ -29,6 +29,7 @@ LOG = logging.getLogger()
 LOG.setLevel(logging.INFO)
 
 NOTIFY_SNS_ARN = os.environ['THROTTLE_EVENTS_TOPIC']
+SNS_NOTIFICATIONS_ENABLED = os.environ.get('SNS_NOTIFICATIONS_ENABLED', False)
 JOB_QUEUE_URL = os.environ['JOB_QUEUE_URL']
 REDIS_ADDRESS = os.environ['REDIS_ADDRESS']
 REDIS_PORT = os.environ['REDIS_PORT']
@@ -219,8 +220,9 @@ class Worker:
         :param message:
         :return:
         """
-        LOG.info('sending notification: message={}'.format(message))
-        time_str = strftime("%a, %d %b %Y %H:%M:%S +0000", gmtime())
-        notify_topic.publish(
-            Message=f"{time_str}: {message}"
-        )
+        if SNS_NOTIFICATIONS_ENABLED:
+            LOG.info('sending notification: message={}'.format(message))
+            time_str = strftime("%a, %d %b %Y %H:%M:%S +0000", gmtime())
+            notify_topic.publish(
+                Message=f"{time_str}: {message}"
+            )
