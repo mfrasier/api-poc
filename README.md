@@ -19,15 +19,12 @@ This application defines all of the infrastructure, including lambda functions.
 ### VPC
 The dedicated POC environment consists of a VPC with subnets in a single availability zone.
  There are typical VPC components like NAT, internet gateway, route tables.
- All components utilize the private subnets for communication with each other.
  
 ### API Gateway
 The API gateway provides http services for the 'external' API service emulator's lambda function.
 
 ### SQS
 An SQS queue is used to queue work for the orchestrator to farm out to the workers.
-
-An SQS interface endpoint is defined to allow private communication to SQS.
 
 ### SNS
 SNS topics and subscriptions are used to publish and consume events of interest.
@@ -75,6 +72,13 @@ a circuit breaker state change from open to closed if the quota has been lifted.
 > A notification is sent to an SNS topic if the circuit breaker state is toggled.
 
 [health message v1](#health-message-v1)  
+
+#### Slack notify
+This lambda is triggered by messages published to the SNS topic.  
+The encrypted slack webhook url is retrieved from the AWS parameter store service.
+The message is sent to the slack topic defined by the webhook. 
+
+Currently, the orchestrator and worker functions can report on their operation. 
  
 #### External API server emulator
 This service emulates a RESTful API server throttling API calls  
@@ -103,7 +107,7 @@ e.g.
 /survey/1/interview/1/attachment/1 return attachment with id `1` from interview `1` of survey `1`
 ```
 
-note: the API server doesn't return any pertinent data yet as we're currently only testing throttling.
+note: the API server doesn't return any real data yet as we're currently only testing throttling.
 It returns a small json payload.
 
 Each call to a resource endpoint decrements that resource and its parent(s) in the throttling db.
