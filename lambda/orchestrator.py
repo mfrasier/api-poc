@@ -82,7 +82,7 @@ def handler(event, context):
                          f'of which {total_requeued} had been requeued')
                 time_str = strftime("%a, %d %b %Y %H:%M:%S +0000", gmtime())
                 notify_topic.publish(
-                    Message=f"{time_str}: orchestrator exiting.\nProcessed {total_messages} messages; "
+                    Message=f"{time_str}: orchestrator exiting. Processed {total_messages} messages; "
                     f"{total_requeued} had been requeued.",
                 )
                 return

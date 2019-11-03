@@ -13,7 +13,6 @@ from aws_cdk import (
     aws_events_targets as targets,
     aws_elasticache as elasticache,
     aws_logs as logs,
-    aws_ssm as ssm,
     core
 )
 import boto3
@@ -255,20 +254,18 @@ class UberStack(core.Stack):
             runtime=_lambda.Runtime.PYTHON_3_7,
             code=_lambda.Code.from_asset('lambda'),
             handler='slack_notify.lambda_handler',
-            # vpc=self._vpc,
-            # vpc_subnets=self._private_subnet_selection,
-            # security_group=self._security_group,
             log_retention=logs.RetentionDays.FIVE_DAYS,
             tracing=_lambda.Tracing.ACTIVE,
         )
         # lambda uses ssm parameter store to retrieve values
         slack_notify.add_environment('encryptedHookUrlKey', '/api_poc/notify/slack/hook_url')
         slack_notify.add_environment('slackChannelKey', '/api_poc/notify/slack/channel')
+        slack_notify.add_environment('notifySlack', 'false')
         slack_notify.add_event_source(event_sources.SnsEventSource(throttle_event_topic))
         slack_notify.add_to_role_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
-                # actions=['ssm:GetParameter', 'ssm:GetParametersByPath'],
+                # actions=['ssm:GetParameter'],
                 actions=['ssm:*'],
                 resources=['arn:aws:ssm:::parameter/api_poc/notify/slack/*'],
             )
@@ -305,17 +302,14 @@ class UberStack(core.Stack):
                     self.poc_config = yaml.safe_load(config_file)
                 except yaml.YAMLError as e:
                     print('error parsing config file: {}'.format(e), file=sys.stderr)
-                    return
         except FileNotFoundError as e:
             print('config file not found: {}'.format(config_file_name), file=sys.stderr)
 
-    def add_sns_subscriptions(self, sns_construct: sns.Topic):
+    def add_sns_subscriptions(self, sns_construct: sns.Topic) -> None:
         """ add subscriptions to sns_topic """
         construct_id = sns_construct.node.id
         topic_config = \
             self.poc_config['api_poc'].get('sns', {})\
-                .get(construct_id, {}).get('subscriptions', [])
+                .get(construct_id, {}).get('subscriptions', {})
 
         add_sns_email_subscriptions(sns_construct, topic_config.get('email', {}))
-
-        # add lambda, etc subscribers
