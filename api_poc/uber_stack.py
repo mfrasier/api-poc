@@ -265,24 +265,22 @@ class UberStack(core.Stack):
         slack_notify.add_to_role_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
+                # TODO fix least privilege
                 # actions=['ssm:GetParameter'],
+                # resources=['arn:aws:ssm:::parameter/api_poc/notify/slack/*'],
                 actions=['ssm:*'],
-                resources=['arn:aws:ssm:::parameter/api_poc/notify/slack/*'],
+                resources=['*'],
             )
         )
 
         # kick off lambda(s) once per interval
-        # See https://docs.aws.amazon.com/lambda/latest/dg/tutorial-scheduled-events-schedule-expressions.html
         rule = events.Rule(
             self, 'orchestrator_rule',
-            schedule=events.Schedule.cron(
-                minute='0/15',
-                hour='*',
-                month='*',
-                week_day='*',
-                year='*'
+            schedule=events.Schedule.rate(
+                core.Duration.hours(1)
             )
         )
+        # See https://docs.aws.amazon.com/lambda/latest/dg/tutorial-scheduled-events-schedule-expressions.html
         rule.add_target(targets.LambdaFunction(orchestrator))
         rule.add_target(targets.LambdaFunction(task_master))
 
